@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from kakao_rent_mcp import models
-from kakao_rent_mcp.tools import eligibility
+from slug_mcp import models
+from slug_mcp.tools import eligibility
 
 
 def _base_profile(**overrides: object) -> models.UserProfile:

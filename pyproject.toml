@@ -1,5 +1,5 @@
 [project]
-name = "kakao-rent-mcp"
+name = "slug-mcp"
 version = "0.1.0"
 description = "한국 주택 청약(분양·임대) 공고를 조회하고, 사용자의 소득·자산·가족구성·청약통장 정보를 바탕으로 자격에 맞는 공고를 추천하는 MCP 서버"
 readme = "README.md"
@@ -12,14 +12,14 @@ dependencies = [
 ]
 
 [project.scripts]
-kakao-rent-mcp = "kakao_rent_mcp.server:main"
+slug-mcp = "slug_mcp.server:main"
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/kakao_rent_mcp"]
+packages = ["src/slug_mcp"]
 
 [dependency-groups]
 dev = [

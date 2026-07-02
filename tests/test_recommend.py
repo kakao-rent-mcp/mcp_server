@@ -6,8 +6,8 @@ from pathlib import Path
 import httpx
 import respx
 
-from kakao_rent_mcp import models
-from kakao_rent_mcp.tools import recommend
+from slug_mcp import models
+from slug_mcp.tools import recommend
 
 FIXTURES = Path(__file__).parent / "fixtures"
 

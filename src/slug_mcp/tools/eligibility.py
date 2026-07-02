@@ -28,7 +28,7 @@ _CAPITAL_REGIONS = {"서울", "경기", "인천"}
 
 @lru_cache(maxsize=1)
 def _load_rules() -> dict[str, Any]:
-    path = resources.files("kakao_rent_mcp.config").joinpath("eligibility_rules.yaml")
+    path = resources.files("slug_mcp.config").joinpath("eligibility_rules.yaml")
     with path.open("r", encoding="utf-8") as f:
         return yaml.safe_load(f)
 

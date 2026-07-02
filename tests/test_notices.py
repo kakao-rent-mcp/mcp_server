@@ -6,7 +6,7 @@ from pathlib import Path
 import httpx
 import respx
 
-from kakao_rent_mcp.tools import notices
+from slug_mcp.tools import notices
 
 FIXTURES = Path(__file__).parent / "fixtures"
 

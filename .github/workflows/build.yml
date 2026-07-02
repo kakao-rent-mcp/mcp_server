@@ -1,14 +1,15 @@
-name: Deploy
+name: Build & Push
 
-# main에 머지(push)되면: 테스트 → 이미지 빌드 → GHCR push → EC2 배포.
-# deploy 잡은 EC2가 준비되기 전까지 자동으로 skip된다 (아래 if 조건 참고).
+# main에 머지(push)되면: 테스트 → Docker 이미지 빌드 → GHCR push.
+# 런타임 배포(컨테이너 기동)는 KC 클라우드 쪽 방식이 정해지면 별도로 붙인다.
+# GHCR에 올라간 이미지를 배포 대상이 pull해 가는 구조를 전제로 한다.
 on:
   push:
     branches: [main]
 
-# 동시에 여러 배포가 겹치지 않게 직렬화한다.
+# 동시에 여러 빌드가 겹치지 않게 직렬화한다.
 concurrency:
-  group: deploy-main
+  group: build-main
   cancel-in-progress: false
 
 jobs:
@@ -61,30 +62,10 @@ jobs:
         with:
           context: .
           push: true
+          # 서비스키를 빌드 시점에만 주입한다. 소스에는 남지 않고 이미지에만 구워진다.
+          # 키가 박힌 이미지이므로 이 GHCR 패키지는 반드시 private으로 유지해야 한다.
+          build-args: |
+            DECODING_KEY=${{ secrets.DECODING_KEY }}
+            ENCODING_KEY=${{ secrets.ENCODING_KEY }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-
-  deploy:
-    needs: build-push
-    runs-on: ubuntu-latest
-    permissions:
-      packages: read
-    steps:
-      - name: SSH into EC2 and (re)deploy container
-        uses: appleboy/ssh-action@v1
-        with:
-          host: ${{ secrets.EC2_HOST }}
-          username: ${{ secrets.EC2_USER }}
-          key: ${{ secrets.EC2_SSH_KEY }}
-          script: |
-            # 개인 PAT 대신, 이 실행(run)에만 유효한 GitHub 발급 임시 토큰을 사용한다.
-            echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
-            docker pull ghcr.io/${{ github.repository }}:latest
-            docker stop kakao-rent-mcp || true
-            docker rm kakao-rent-mcp || true
-            docker run -d --name kakao-rent-mcp --restart unless-stopped \
-              -p 8000:8000 \
-              -e MCP_TRANSPORT=streamable-http \
-              -e DECODING_KEY='${{ secrets.DECODING_KEY }}' \
-              -e ENCODING_KEY='${{ secrets.ENCODING_KEY }}' \
-              ghcr.io/${{ github.repository }}:latest
