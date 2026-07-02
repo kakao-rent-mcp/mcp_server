@@ -77,24 +77,20 @@ uv run mypy src             # 타입체크
   - `build-push`: Docker 이미지를 빌드해 `ghcr.io/<이 저장소>`에 `latest`와 커밋 sha
     태그로 올린다. GitHub 내장 토큰만 쓰므로 별도 등록이 필요 없다.
   - `deploy`: EC2에 SSH로 붙어 최신 이미지를 pull하고 컨테이너를 재기동한다.
-    **EC2가 준비되기 전까지는 자동으로 skip된다.**
 
-## 배포 (EC2 자동 배포 켜는 법)
+## 배포 (EC2 접속 정보 등록)
 
-`deploy` 잡은 저장소 Variable `DEPLOY_ENABLED`가 `true`일 때만 실행됩니다. EC2가
-준비되면 아래를 등록한 뒤 스위치를 켜면 main 머지마다 자동 배포됩니다.
+`deploy` 잡이 동작하려면 아래 Secrets가 등록돼 있어야 합니다 (Settings →
+Secrets and variables → Actions → Secrets).
 
-1. **Variables** (Settings → Secrets and variables → Actions → Variables)
-   - `DEPLOY_ENABLED` = `true`
-2. **Secrets** (같은 화면의 Secrets 탭)
-   | 이름 | 값 |
-   |---|---|
-   | `EC2_HOST` | EC2 퍼블릭 IP 또는 도메인 |
-   | `EC2_USER` | SSH 계정 (예: `ubuntu`, `ec2-user`) |
-   | `EC2_SSH_KEY` | EC2 접속용 개인키 전체 내용 (PEM) |
-   | `GHCR_PAT` | GHCR 이미지 pull용 PAT (`read:packages`) — 이미지가 private일 때 |
-   | `DECODING_KEY` | 공공데이터포털 디코딩 서비스키 |
-   | `ENCODING_KEY` | 공공데이터포털 인코딩 서비스키 |
+| 이름 | 값 |
+|---|---|
+| `EC2_HOST` | EC2 퍼블릭 IP 또는 도메인 |
+| `EC2_USER` | SSH 계정 (예: `ubuntu`, `ec2-user`) |
+| `EC2_SSH_KEY` | EC2 접속용 개인키 전체 내용 (PEM) |
+| `GHCR_PAT` | GHCR 이미지 pull용 PAT (`read:packages`) — 이미지가 private일 때 |
+| `DECODING_KEY` | 공공데이터포털 디코딩 서비스키 |
+| `ENCODING_KEY` | 공공데이터포털 인코딩 서비스키 |
 
 수동으로 EC2에서 직접 받아 실행하려면:
 

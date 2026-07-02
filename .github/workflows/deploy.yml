@@ -67,10 +67,6 @@ jobs:
   deploy:
     needs: build-push
     runs-on: ubuntu-latest
-    # EC2가 아직 없으므로 기본은 skip. EC2가 준비되면
-    # 저장소 Variables에 DEPLOY_ENABLED=true 를 추가하고,
-    # 아래 secrets(EC2_HOST/EC2_USER/EC2_SSH_KEY/GHCR_PAT/DECODING_KEY/ENCODING_KEY)를 등록하면 켜진다.
-    if: ${{ vars.DEPLOY_ENABLED == 'true' }}
     steps:
       - name: SSH into EC2 and (re)deploy container
         uses: appleboy/ssh-action@v1
