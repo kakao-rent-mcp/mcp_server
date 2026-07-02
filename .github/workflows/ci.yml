@@ -1,8 +1,7 @@
 name: CI
 
+# PR 게이트 전용. main 머지 시의 test/build/deploy는 deploy.yml이 담당한다.
 on:
-  push:
-    branches: [main]
   pull_request:
 
 jobs:

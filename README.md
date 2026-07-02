@@ -70,27 +70,42 @@ uv run mypy src             # 타입체크
 
 ## CI/CD
 
-- **`.github/workflows/ci.yml`**: PR과 main push마다 린트·포맷·타입체크·테스트를 돈다.
+- **`.github/workflows/ci.yml`**: PR마다 린트·포맷·타입체크·테스트를 돈다 (PR 게이트).
   실제 API 키는 필요 없다 (fixture 기반).
-- **`.github/workflows/release.yml`**: `v*` 형태 태그를 push하면 Docker 이미지를 빌드해
-  `ghcr.io/<이 저장소>`에 올린다. GitHub 자체 인증만 쓰므로 별도 토큰 등록이 필요 없다.
+- **`.github/workflows/deploy.yml`**: `main`에 머지(push)되면 `test → build-push → deploy`를
+  순차 실행한다.
+  - `build-push`: Docker 이미지를 빌드해 `ghcr.io/<이 저장소>`에 `latest`와 커밋 sha
+    태그로 올린다. GitHub 내장 토큰만 쓰므로 별도 등록이 필요 없다.
+  - `deploy`: EC2에 SSH로 붙어 최신 이미지를 pull하고 컨테이너를 재기동한다.
+    **EC2가 준비되기 전까지는 자동으로 skip된다.**
 
-## 배포
+## 배포 (EC2 자동 배포 켜는 법)
 
-현재는 "태그 push → GHCR에 이미지 올리기"까지만 자동화되어 있습니다. EC2에서 그
-이미지를 받아 실행하는 절차입니다 (수동, 추후 자동화 예정):
+`deploy` 잡은 저장소 Variable `DEPLOY_ENABLED`가 `true`일 때만 실행됩니다. EC2가
+준비되면 아래를 등록한 뒤 스위치를 켜면 main 머지마다 자동 배포됩니다.
+
+1. **Variables** (Settings → Secrets and variables → Actions → Variables)
+   - `DEPLOY_ENABLED` = `true`
+2. **Secrets** (같은 화면의 Secrets 탭)
+   | 이름 | 값 |
+   |---|---|
+   | `EC2_HOST` | EC2 퍼블릭 IP 또는 도메인 |
+   | `EC2_USER` | SSH 계정 (예: `ubuntu`, `ec2-user`) |
+   | `EC2_SSH_KEY` | EC2 접속용 개인키 전체 내용 (PEM) |
+   | `GHCR_PAT` | GHCR 이미지 pull용 PAT (`read:packages`) — 이미지가 private일 때 |
+   | `DECODING_KEY` | 공공데이터포털 디코딩 서비스키 |
+   | `ENCODING_KEY` | 공공데이터포털 인코딩 서비스키 |
+
+수동으로 EC2에서 직접 받아 실행하려면:
 
 ```bash
-docker pull ghcr.io/<owner>/<repo>:v0.1.0
-docker run -d --restart unless-stopped \
+docker pull ghcr.io/<owner>/<repo>:latest
+docker run -d --name kr-housing-mcp --restart unless-stopped \
   -p 8000:8000 \
   --env-file .env \
   -e MCP_TRANSPORT=streamable-http \
-  ghcr.io/<owner>/<repo>:v0.1.0
+  ghcr.io/<owner>/<repo>:latest
 ```
-
-EC2 접속 정보(호스트, SSH 키)를 GitHub Secrets에 등록하면 `release.yml`에
-pull/재시작 단계를 추가해 완전 자동 배포로 확장할 수 있습니다.
 
 ## 기여
 

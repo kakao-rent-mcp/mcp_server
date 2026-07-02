@@ -1,0 +1,92 @@
+name: Deploy
+
+# main에 머지(push)되면: 테스트 → 이미지 빌드 → GHCR push → EC2 배포.
+# deploy 잡은 EC2가 준비되기 전까지 자동으로 skip된다 (아래 if 조건 참고).
+on:
+  push:
+    branches: [main]
+
+# 동시에 여러 배포가 겹치지 않게 직렬화한다.
+concurrency:
+  group: deploy-main
+  cancel-in-progress: false
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+      - run: uv sync
+      - name: Lint (ruff check)
+        run: uv run ruff check .
+      - name: Format check (ruff format)
+        run: uv run ruff format --check .
+      - name: Type check (mypy)
+        run: uv run mypy src
+      - name: Test (pytest, fixture 목킹만 — 실제 API 키 불필요)
+        run: uv run pytest -v
+
+  build-push:
+    needs: test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract image metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository }}
+          # main 최신본은 :latest, 추적용으로 커밋 sha 태그도 함께 붙인다.
+          tags: |
+            type=raw,value=latest
+            type=sha
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+
+  deploy:
+    needs: build-push
+    runs-on: ubuntu-latest
+    # EC2가 아직 없으므로 기본은 skip. EC2가 준비되면
+    # 저장소 Variables에 DEPLOY_ENABLED=true 를 추가하고,
+    # 아래 secrets(EC2_HOST/EC2_USER/EC2_SSH_KEY/GHCR_PAT/DECODING_KEY/ENCODING_KEY)를 등록하면 켜진다.
+    if: ${{ vars.DEPLOY_ENABLED == 'true' }}
+    steps:
+      - name: SSH into EC2 and (re)deploy container
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          script: |
+            # GHCR 이미지가 private이면 EC2에서도 로그인이 필요하다 (read:packages 권한 PAT).
+            echo "${{ secrets.GHCR_PAT }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+            docker pull ghcr.io/${{ github.repository }}:latest
+            docker stop kr-housing-mcp || true
+            docker rm kr-housing-mcp || true
+            docker run -d --name kr-housing-mcp --restart unless-stopped \
+              -p 8000:8000 \
+              -e MCP_TRANSPORT=streamable-http \
+              -e DECODING_KEY='${{ secrets.DECODING_KEY }}' \
+              -e ENCODING_KEY='${{ secrets.ENCODING_KEY }}' \
+              ghcr.io/${{ github.repository }}:latest
