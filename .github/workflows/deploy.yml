@@ -67,6 +67,8 @@ jobs:
   deploy:
     needs: build-push
     runs-on: ubuntu-latest
+    permissions:
+      packages: read
     steps:
       - name: SSH into EC2 and (re)deploy container
         uses: appleboy/ssh-action@v1
@@ -75,8 +77,8 @@ jobs:
           username: ${{ secrets.EC2_USER }}
           key: ${{ secrets.EC2_SSH_KEY }}
           script: |
-            # GHCR 이미지가 private이면 EC2에서도 로그인이 필요하다 (read:packages 권한 PAT).
-            echo "${{ secrets.GHCR_PAT }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+            # 개인 PAT 대신, 이 실행(run)에만 유효한 GitHub 발급 임시 토큰을 사용한다.
+            echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
             docker pull ghcr.io/${{ github.repository }}:latest
             docker stop kakao-rent-mcp || true
             docker rm kakao-rent-mcp || true

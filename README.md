@@ -88,7 +88,6 @@ Secrets and variables → Actions → Secrets).
 | `EC2_HOST` | EC2 퍼블릭 IP 또는 도메인 |
 | `EC2_USER` | SSH 계정 (예: `ubuntu`, `ec2-user`) |
 | `EC2_SSH_KEY` | EC2 접속용 개인키 전체 내용 (PEM) |
-| `GHCR_PAT` | GHCR 이미지 pull용 PAT (`read:packages`) — 이미지가 private일 때 |
 | `DECODING_KEY` | 공공데이터포털 디코딩 서비스키 |
 | `ENCODING_KEY` | 공공데이터포털 인코딩 서비스키 |
 
