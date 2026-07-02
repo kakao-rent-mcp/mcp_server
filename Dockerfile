@@ -24,4 +24,4 @@ ENV PATH="/app/.venv/bin:$PATH" \
 
 EXPOSE 8000
 
-CMD ["kr-housing-mcp"]
+CMD ["kakao-rent-mcp"]

@@ -6,7 +6,7 @@ from pathlib import Path
 import httpx
 import respx
 
-from kr_housing_mcp.tools import competition
+from kakao_rent_mcp.tools import competition
 
 FIXTURES = Path(__file__).parent / "fixtures"
 

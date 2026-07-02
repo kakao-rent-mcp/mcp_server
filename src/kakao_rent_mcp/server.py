@@ -18,7 +18,7 @@ _Transport = Literal["stdio", "http", "sse", "streamable-http"]
 _VALID_TRANSPORTS = get_args(_Transport)
 
 mcp = FastMCP(
-    name="kr-housing-mcp",
+    name="kakao-rent-mcp",
     instructions=(
         "한국 주택 청약(분양/임대) 공고를 검색하고, 사용자의 소득·자산·"
         "가족구성·청약통장 정보를 바탕으로 자격 여부를 판정해 맞는 공고를 추천합니다. "

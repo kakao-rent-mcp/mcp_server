@@ -1,4 +1,4 @@
-# kr-housing-mcp
+# kakao-rent-mcp
 
 한국 주택 청약(분양·임대) 공고를 조회하고, 사용자의 소득·자산·가족구성·청약통장 정보를
 바탕으로 자격에 맞는 공고를 추천하는 [FastMCP](https://github.com/jlowin/fastmcp) 서버입니다.
@@ -12,7 +12,7 @@
 ```bash
 uv sync
 cp .env.example .env   # 발급받은 서비스키를 .env에 채워 넣기
-uv run kr-housing-mcp
+uv run kakao-rent-mcp
 ```
 
 기본 실행 방식은 `stdio`라서 Claude Desktop 같은 로컬 MCP 클라이언트에 바로 붙일 수
@@ -41,7 +41,7 @@ uv run kr-housing-mcp
 
 ## 알려진 미완성 부분 (같이 다듬어야 할 것)
 
-- **소득기준표가 비어 있습니다.** `src/kr_housing_mcp/config/eligibility_rules.yaml`의
+- **소득기준표가 비어 있습니다.** `src/kakao_rent_mcp/config/eligibility_rules.yaml`의
   `median_monthly_income_by_household_size`가 빈 값입니다. 통계청 KOSIS 또는
   청약홈이 매년 발표하는 확정표로 채워야 소득 조건이 정상 판정됩니다. 채우기 전까지
   `check_eligibility`는 소득 조건을 `needs_manual_review=True`로 표시하고 넘어갑니다.
@@ -100,7 +100,7 @@ uv run mypy src             # 타입체크
 
 ```bash
 docker pull ghcr.io/<owner>/<repo>:latest
-docker run -d --name kr-housing-mcp --restart unless-stopped \
+docker run -d --name kakao-rent-mcp --restart unless-stopped \
   -p 8000:8000 \
   --env-file .env \
   -e MCP_TRANSPORT=streamable-http \

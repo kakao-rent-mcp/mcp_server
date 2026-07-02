@@ -82,9 +82,9 @@ jobs:
             # GHCR 이미지가 private이면 EC2에서도 로그인이 필요하다 (read:packages 권한 PAT).
             echo "${{ secrets.GHCR_PAT }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
             docker pull ghcr.io/${{ github.repository }}:latest
-            docker stop kr-housing-mcp || true
-            docker rm kr-housing-mcp || true
-            docker run -d --name kr-housing-mcp --restart unless-stopped \
+            docker stop kakao-rent-mcp || true
+            docker rm kakao-rent-mcp || true
+            docker run -d --name kakao-rent-mcp --restart unless-stopped \
               -p 8000:8000 \
               -e MCP_TRANSPORT=streamable-http \
               -e DECODING_KEY='${{ secrets.DECODING_KEY }}' \
