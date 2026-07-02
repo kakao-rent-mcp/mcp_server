@@ -1,0 +1,32 @@
+{
+  "page": 1,
+  "perPage": 1,
+  "totalCount": 2811,
+  "currentCount": 1,
+  "matchCount": 2811,
+  "data": [
+    {
+      "HOUSE_MANAGE_NO": "2026000320",
+      "PBLANC_NO": "2026000320",
+      "HOUSE_NM": "고양창릉 S-4블록 공공분양주택(본청약)",
+      "HOUSE_SECD": "01",
+      "HOUSE_SECD_NM": "APT",
+      "HOUSE_DTL_SECD": "03",
+      "HOUSE_DTL_SECD_NM": "국민",
+      "RENT_SECD": "0",
+      "RENT_SECD_NM": "분양주택",
+      "SUBSCRPT_AREA_CODE": "410",
+      "SUBSCRPT_AREA_CODE_NM": "경기",
+      "HSSPLY_ADRES": "경기도 고양시 덕양구 도내동 외 8개동 일원 고양창릉 공공주택지구 내 S-4블록",
+      "HSSPLY_ZIP": "10554",
+      "BSNS_MBY_NM": "한국토지주택공사 경기북부지역본부",
+      "CNSTRCT_ENTRPS_NM": "요진건설산업(주)",
+      "TOT_SUPLY_HSHLDCO": 1024,
+      "RCEPT_BGNDE": "2026-07-20",
+      "RCEPT_ENDDE": "2026-07-29",
+      "RCRIT_PBLANC_DE": "2026-06-30",
+      "PRZWNER_PRESNATN_DE": "2026-08-19",
+      "PBLANC_URL": "https://www.applyhome.co.kr/ai/aia/selectAPTLttotPblancDetail.do?houseManageNo=2026000320&pblancNo=2026000320"
+    }
+  ]
+}

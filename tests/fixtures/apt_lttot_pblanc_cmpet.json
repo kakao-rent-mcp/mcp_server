@@ -1,0 +1,21 @@
+{
+  "page": 1,
+  "perPage": 1,
+  "totalCount": 53404,
+  "currentCount": 1,
+  "matchCount": 53404,
+  "data": [
+    {
+      "HOUSE_MANAGE_NO": "2026000273",
+      "PBLANC_NO": "2026000273",
+      "HOUSE_TY": "084.8315A",
+      "MODEL_NO": "01",
+      "SUBSCRPT_RANK_CODE": 1,
+      "RESIDE_SECD": "01",
+      "RESIDE_SENM": "해당지역",
+      "SUPLY_HSHLDCO": 157,
+      "REQ_CNT": "595",
+      "CMPET_RATE": "3.79"
+    }
+  ]
+}

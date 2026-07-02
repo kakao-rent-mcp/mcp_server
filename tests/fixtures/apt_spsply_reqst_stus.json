@@ -1,0 +1,26 @@
+{
+  "page": 1,
+  "perPage": 1,
+  "totalCount": 12032,
+  "currentCount": 1,
+  "matchCount": 12032,
+  "data": [
+    {
+      "HOUSE_MANAGE_NO": "2026000275",
+      "PBLANC_NO": "2026000275",
+      "HOUSE_TY": "039.6200B",
+      "SPSPLY_HSHLDCO": 10,
+      "LFE_FRST_HSHLDCO": 1,
+      "NWWDS_NMTW_HSHLDCO": 3,
+      "MNYCH_HSHLDCO": 2,
+      "NWBB_NWBBSHR_HSHLDCO": 2,
+      "OLD_PARNTS_SUPORT_HSHLDCO": 0,
+      "INSTT_RECOMEND_HSHLDCO": 2,
+      "INSTT_RECOMEND_DCSN_CNT": 1,
+      "TRANSR_INSTT_ENFSN_HSHLDCO": 0,
+      "CRSPAREA_LFE_FRST_CNT": 202,
+      "ETC_AREA_LFE_FRST_CNT": 47,
+      "SUBSCRPT_RESULT_NM": "청약접수 종료"
+    }
+  ]
+}

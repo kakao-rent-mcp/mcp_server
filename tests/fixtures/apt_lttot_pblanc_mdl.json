@@ -1,0 +1,19 @@
+{
+  "page": 1,
+  "perPage": 1,
+  "totalCount": 14343,
+  "currentCount": 1,
+  "matchCount": 14343,
+  "data": [
+    {
+      "HOUSE_MANAGE_NO": "2026820005",
+      "PBLANC_NO": "2026820005",
+      "MODEL_NO": "01",
+      "HOUSE_TY": "055.9200A",
+      "SUPLY_AR": "80.6230",
+      "SUPLY_HSHLDCO": 0,
+      "SPSPLY_HSHLDCO": 159,
+      "LTTOT_TOP_AMOUNT": "50724"
+    }
+  ]
+}
