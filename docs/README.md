@@ -20,6 +20,7 @@ README.md로 링크합니다.
 | [product-concept.md](product-concept.md) | 이 서비스가 누구를 위해 무엇을 하는가, 현재 구현 범위와 간극 |
 | [architecture-decisions.md](architecture-decisions.md) | 배포/CI-CD 경계, 도구 세분화 전략 등 결정 기록(ADR) |
 | [playmcp-guidelines.md](playmcp-guidelines.md) | 카카오 PlayMCP 심사 규정 원문 + 현재 구현의 충족 여부 체크리스트 |
+| [subscription-policy-spec.md](subscription-policy-spec.md) | 청약 자격판정·가점계산 룰 엔진 정책 명세(입력/필터/공공·민영 분기/가점산식/출력) + 조항별 검증상태 |
 
 ## 권장 읽는 순서
 
