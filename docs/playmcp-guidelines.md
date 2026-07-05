@@ -53,14 +53,14 @@
 | 1-1 지원 버전 범위 | ⬜ 확인 필요 | FastMCP가 보고하는 protocolVersion 검증 기록 없음 |
 | 1-1 Streamable HTTP만 | ✅ 충족 | README, `server.py` |
 | 1-1 Remote(공개 URL) | ⬜ 배포 후 확인 | [ADR-001](architecture-decisions.md#adr-001) |
-| 1-1 Stateless 권장 | ✅ 충족 | `server.py`의 `stateless_http=True` |
+| 1-1 Stateless 권장 | ✅ 충족 | `server.py`의 `stateless_http=True`. 프로필 세션은 애플리케이션 수준 상태(인메모리, [ADR-003](architecture-decisions.md#adr-003))로, MCP 프로토콜 세션과 무관 |
 | 1-1 사용자 인증(해당 시) | ⬜ 판단 필요 | 소득·자산 등 개인 정보를 인증 없이 파라미터로 받음 — 인증이 "필요한 경우"에 해당하는지 자체가 미검토 |
 | 1-2 Inspector 사전 점검 | ⬜ 미실시 | README에 계획만 명시됨 |
 | 1-3 활발한 SDK | ✅ 충족 | FastMCP |
 | 1-4 "kakao" 네이밍 금지 | ✅ 충족 | 서버명 `slug-mcp`, 도구명 확인됨 |
-| 2-1 툴 이름 규칙 | ✅ 충족 | 5개 도구 모두 조건 만족 |
-| 2-2 툴 개수(3~10 권장) | ✅ 충족 | 5개 |
-| 2-3 annotations 5종 | ✅ 충족 | `server.py`의 `_READ_EXTERNAL` / `_READ_LOCAL` |
+| 2-1 툴 이름 규칙 | ✅ 충족 | 7개 도구 모두 조건 만족 — `tests/test_server.py`가 자동 검증 |
+| 2-2 툴 개수(3~10 권장) | ✅ 충족 | 7개 |
+| 2-3 annotations 5종 | ✅ 충족 | `server.py`의 `_READ_EXTERNAL` / `_READ_LOCAL` / `_WRITE_LOCAL` — `tests/test_server.py`가 자동 검증 |
 | 2-4 서비스명 병기 | ✅ 충족 | `[슬러그(Slug)]` 접두 |
 | 2-4 영문 작성 권장 | ⚠️ 부분 충족 | 서비스명은 국·영문 병기지만 description 본문은 한글 |
 | 2-4 1,024자 이내 | ✅ 충족 | 본문 길이 상 문제 없음 |
