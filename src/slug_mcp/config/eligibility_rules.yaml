@@ -1,38 +1,68 @@
-# 청약 자격판정 기준값
+# 청약 자격판정·가점계산 기준값 (룰 엔진 SOT 미러)
 #
-# 작성일: 2026-07-01 (웹 검색 기준 확인, kk 프로젝트 조사)
+# 작성일: 2026-07-05 (웹 재검증 완료분 반영)
 # 중요: 아래 수치는 자동으로 갱신되지 않습니다. 법령/고시 개정 시 사람이 직접 고쳐야 합니다.
-#       실제 서비스에 반영하기 전, 반드시 아래 출처 원문으로 재확인하세요.
+#       각 섹션의 출처 주석과 docs/subscription-policy-spec.md 의 검증 태그를 함께 갱신하세요.
 #
 # 출처:
 #   - 자산기준: 국가법령정보센터 "공공주택 입주자 보유 부동산 및 자동차 관련 업무처리기준"
-#     https://www.law.go.kr/행정규칙/공공주택입주자보유자산관련업무처리기준
-#   - 소득기준 비율: 주택공급에 관한 규칙 / 공공주택 특별법 시행규칙
-#   - 민영주택 예치금표, 공공주택 순위요건: 청약홈 청약제도안내
-#     https://www.applyhome.co.kr
+#     + 2026-02-27 입주자모집공고분 실측값
+#   - 소득기준표: LH청약플러스 임대가이드 (2025년도 적용 도시근로자 가구원수별 월평균소득,
+#     https://apply.lh.or.kr/lhapply/cm/cntnts/cntntsView.do?cntntsId=1201391) 2026-07-05 확인
+#   - 규제지역: 국토교통부 10.15 대책(2025-10-15) — 서울 전역 + 경기 12곳
+#   - 민영주택 예치금표, 공공주택 순위요건: 청약홈 청약제도안내 (applyhome.co.kr)
+#   - 신혼부부 특공 배점표: LH청약플러스 청약자격확인(분양주택) 2026-07-05 직접 확인
+#     (우선공급 경쟁 시 9점 만점, 일반공급 경쟁 시 12점 만점 — 기획서의 13점표를 교체)
 
-# 자산 상한 (2026-02-27 입주자모집공고분부터 적용, 단위: 만원)
+# 자산 상한 (공공분양 전용 60㎡ 이하 신청 시 적용, 2026-02-27 공고분 기준, 단위: 만원)
+# 주의: 매입임대·전세임대 자산기준(고시 2025-560호, 자동차 4,563만원)과 트랙이 다름 — 혼용 금지.
 asset_limits:
   real_estate_10k_won: 21550
   vehicle_10k_won: 4542
   total_asset_10k_won: 34500
 
-# 공급유형별 소득기준 비율 (도시근로자 가구원수별 월평균소득 대비 %)
+# 공급유형별 소득 자격 상한 비율 (도시근로자 가구원수별 월평균소득 대비 %)
 income_ratio_by_supply_type:
   generic: 100 # 공공분양 일반공급
   newlywed: 130 # 신혼부부 특별공급 (외벌이)
-  newlywed_dual_income: 140 # 신혼부부 특별공급 (맞벌이). 완화 조건에 따라 최대 200%까지 허용되는 공고도 있어 공고문 확인 필요
+  newlywed_dual_income: 140 # 신혼부부 특별공급 (맞벌이). 완화 조건에 따라 최대 200%까지 허용되는 공고도 있음
   multi_child: 120 # 다자녀가구 특별공급
   old_parents: 120 # 노부모부양 특별공급
-  newborn: 140 # 신생아 특별공급
+  newborn: 140 # 신생아 특별공급 (추첨공급은 별도 완화, newborn_supply 참고)
   first_time: 130 # 생애최초 특별공급
 
-# 도시근로자 가구원수별 월평균소득 (단위: 만원/월)
-# TODO(중요, 미완성): 실제 수치를 아직 채우지 못했습니다.
-#   통계청 KOSIS 또는 청약홈이 매년 발표하는 확정표로 값을 채워 넣어야 합니다.
-#   이 표가 비어 있는 동안 eligibility.py는 소득 판정을 "판정 불가(needs_manual_review)"로 처리합니다.
-median_monthly_income_by_household_size: {}
-# 예시 형식(값은 채워야 함): {"1": 0, "2": 0, "3": 0, "4": 0, "5": 0}
+# 도시근로자 가구원수별 월평균소득 100% (단위: 원/월)
+# 2025년도 적용분 — LH청약플러스 2026-07-05 확인. 매년 새 표가 나오면 교체할 것.
+# 8인 초과 가구: 8인 금액 + 초과 1인당 959,198원.
+urban_worker_monthly_income_krw:
+  "1": 3813363
+  "2": 5866270
+  "3": 8168429
+  "4": 8802202
+  "5": 9326985
+  "6": 9906263
+  "7": 10485541
+  "8": 11064819
+extra_person_income_krw: 959198
+
+# 규제지역(조정대상지역·투기과열지구) 동적 목록 — 2025-10-15 대책 반영.
+# "강남3구·용산" 하드코딩 금지(스펙 Filter-03). 고시 개정 시 이 목록만 갱신한다.
+# 매칭 방식: 지역 문자열에 아래 시·도가 포함되면 규제. 경기는 세부 지역까지 확인.
+regulated_regions:
+  full_sido: ["서울"] # 시·도 전체가 규제인 곳
+  gyeonggi_districts: # 경기 12곳
+    - "과천"
+    - "광명"
+    - "성남 분당"
+    - "성남 수정"
+    - "성남 중원"
+    - "수원 영통"
+    - "수원 장안"
+    - "수원 팔달"
+    - "안양 동안"
+    - "용인 수지"
+    - "의왕"
+    - "하남"
 
 # 지역 등급 — 민영주택 예치금표에 쓰이는 지역 구분
 region_tier:
@@ -54,5 +84,53 @@ subscription_account:
       capital_region: { min_months: 12, min_payments: 12 }
       non_capital_region: { min_months: 6, min_payments: 6 }
       overheated_region: { min_months: 24, min_payments: 24 }
-    # 순차제 계산 시 인정되는 월 납입액 상한 (2024-11 기준, 단위: 만원)
-    max_recognized_monthly_payment_10k_won: 25
+    # 순차제 계산 시 인정되는 월 납입액 상한 (2024-11 개정, 단위: 원)
+    max_recognized_monthly_payment_krw: 250000
+
+# 신생아 특별공급(공공) 물량 배분 + 소득기준 (LH청약플러스 확인 — 스펙 §2.B.①)
+# 우선·일반(90%)은 배점 다득점순, 순수 추첨은 10%뿐이다.
+newborn_supply:
+  priority: { share: 70, income_ratio: 100, income_ratio_dual: 120 }
+  general: { share: 20, income_ratio: 140, income_ratio_dual: 150 }
+  lottery: { share: 10, income_ratio_dual_max: 200 } # 140% 초과(자산요건 충족), 맞벌이 200% 이하
+
+# 신혼부부 특별공급(공공) 배점표 — LH청약플러스 청약자격확인 2026-07-05 직접 확인.
+# 5개 항목 각 3점. 우선공급 경쟁 시 [소득+거주+납입] 9점 만점,
+# 일반공급 경쟁 시 [거주+납입+자녀+무주택] 12점 만점.
+newlywed_score_table:
+  income_ratio: { high: { max_ratio: 70, points: 3 }, mid: { max_ratio: 100, points: 2 }, low: { points: 1 } }
+  residence_years: { high: { min_years: 2, points: 3 }, mid: { min_years: 1, points: 2 }, low: { min_years: 0, points: 1 } }
+  payment_count: { high: { min_count: 24, points: 3 }, mid: { min_count: 12, points: 2 }, low: { min_count: 6, points: 1 } }
+  children_count: { high: { min_count: 3, points: 3 }, mid: { min_count: 2, points: 2 }, low: { min_count: 1, points: 1 } }
+  homeless_years: { high: { min_years: 3, points: 3 }, mid: { min_years: 1, points: 2 }, low: { min_years: 0, points: 1 } }
+
+# 다자녀 특별공급(공공) 배점표 — 100점 만점 (스펙 §2.B.③, 🟢 검증)
+# 가입기간은 최대 5점(10점 아님), 세대구성 5점이 별도 존재한다.
+multi_child_score_table:
+  children: { "4": 40, "3": 35, "2": 25 }
+  infants: { "3": 15, "2": 10, "1": 5 }
+  household_composition_bonus: 5 # 3세대 이상 동거 또는 한부모
+  homeless_years: { "10": 20, "5": 15, "1": 10 }
+  residence_years: { "10": 15, "5": 10, "1": 5 }
+  account_years: { "10": 5, "5": 3, "1": 1 }
+
+# 목표지역 등급별 예상 컷오프 (2026 예상 — 참고용 DB, 법정 기준 아님. 스펙 §6.A)
+# 실시간 값은 recommend_housing이 과거 당첨가점 API로 보정한다.
+expected_cutoffs:
+  S: { private_score_min: 69, private_score_max: 74, public_balance_min_krw: 22000000 }
+  A: { private_score_min: 59, private_score_max: 68, public_balance_min_krw: 17000000 }
+  B: { private_score_min: 40, private_score_max: 58, public_balance_min_krw: 12000000 }
+  C: { private_score_min: 0, private_score_max: 39, public_balance_min_krw: 0 }
+
+# 지역 문자열 → 등급 매핑 (위에서부터 첫 매치 우선. 어디에도 없으면 C)
+region_grade_keywords:
+  S: ["강남", "서초", "송파", "용산", "마포", "성동"]
+  A: ["서울", "하남", "과천", "분당"]
+  B: ["경기", "인천", "부산", "대구", "광주", "대전", "울산", "세종"]
+
+# 강제 매칭(is_forced_matching) 시 대안 지역 제안 (스펙 §6.B Case 4)
+alternative_regions:
+  - region: "경기 3기 신도시 (하남 교산/고양 창릉/남양주 왕숙 등)"
+    reason: "서울 대비 당첨 저축총액·가점 컷이 낮고 사전·본청약 물량이 이어진다."
+  - region: "GTX 노선 인근 외곽 (파주 운정/양주/평택 등)"
+    reason: "교통 호재 대비 경쟁률이 낮아 낮은 가점으로도 실현 가능성이 있다."

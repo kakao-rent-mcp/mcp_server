@@ -18,7 +18,7 @@ from typing import Any, Literal, cast, get_args
 
 from fastmcp import FastMCP
 
-from .tools import competition, eligibility, notices, recommend
+from .tools import analyze, competition, notices, profile, recommend
 
 _Transport = Literal["stdio", "http", "sse", "streamable-http"]
 _VALID_TRANSPORTS = get_args(_Transport)
@@ -29,16 +29,20 @@ SERVICE_NAME = "슬러그(Slug)"
 mcp = FastMCP(
     name="slug-mcp",
     instructions=(
-        f"{SERVICE_NAME}: 한국 주택 청약(분양/임대) 공고를 검색하고, 사용자의 소득·자산·"
-        "가족구성·청약통장 정보를 바탕으로 자격 여부를 판정해 맞는 공고를 추천합니다. "
-        "금액 단위는 모두 '만원'입니다."
+        f"{SERVICE_NAME}: 한국 주택 청약 공고를 검색하고, 사용자의 소득·자산·가족구성·"
+        "청약통장 정보로 자격·가점을 판정해 당첨 가능성이 높은 공고를 추천합니다. "
+        "권장 사용 흐름: (1) 대화에서 파악한 사용자 정보를 update_my_profile로 저장하고 "
+        "응답의 next_questions로 부족한 정보를 물어 채운다 → (2) 같은 session_id로 "
+        "analyze_my_subscription(종합 판정) 또는 recommend_housing(공고 추천)을 호출한다. "
+        "금액 단위는 모두 원(KRW)이며 필드명에 _krw가 붙습니다. "
+        "프로필은 서버 메모리에 24시간만 보관됩니다."
     ),
 )
 
 # (함수, 제목, annotations) — PlayMCP는 title/readOnlyHint/destructiveHint/
 # openWorldHint/idempotentHint 5종을 모두 명시할 것을 요구한다.
-# 5개 도구 모두 데이터를 바꾸지 않는 조회/계산이라 readOnly=True, destructive=False,
-# idempotent=True. 외부 공공데이터 API를 부르는 도구만 openWorld=True.
+# 조회·계산 도구는 readOnly=True, 외부 공공데이터 API를 부르면 openWorld=True.
+# update_my_profile만 세션 상태를 바꾸므로 readOnly=False (병합 갱신이라 파괴적이지 않음).
 _READ_EXTERNAL: dict[str, Any] = {
     "readOnlyHint": True,
     "destructiveHint": False,
@@ -46,12 +50,15 @@ _READ_EXTERNAL: dict[str, Any] = {
     "openWorldHint": True,
 }
 _READ_LOCAL: dict[str, Any] = {**_READ_EXTERNAL, "openWorldHint": False}
+_WRITE_LOCAL: dict[str, Any] = {**_READ_LOCAL, "readOnlyHint": False}
 
 _TOOLS: tuple[tuple[Callable[..., Any], str, dict[str, Any]], ...] = (
     (notices.search_housing_notices, "분양 공고 검색", _READ_EXTERNAL),
     (notices.get_notice_detail, "분양 공고 상세 조회", _READ_EXTERNAL),
     (competition.get_competition_stats, "경쟁률·당첨가점 조회", _READ_EXTERNAL),
-    (eligibility.check_eligibility, "청약 자격 판정", _READ_LOCAL),
+    (profile.update_my_profile, "내 프로필 저장·갱신", _WRITE_LOCAL),
+    (profile.get_my_profile, "내 프로필 조회", _READ_LOCAL),
+    (analyze.analyze_my_subscription, "청약 종합 판정", _READ_LOCAL),
     (recommend.recommend_housing, "맞춤 청약 추천", _READ_EXTERNAL),
 )
 
