@@ -1,0 +1,31 @@
+[
+  {
+    "dsSupInfo": [
+      { "SS_CODE": "Y", "PAN_ID": "0000059187", "HSH_NM": "고양삼송 A-1블록", "SPL_HHLD_CO": "120" }
+    ]
+  },
+  {
+    "dsSplScdl": [
+      { "SUBSCRT_RCPT_ST_DT": "2020-03-20", "SUBSCRT_RCPT_ED_DT": "2020-03-24" }
+    ]
+  },
+  {
+    "dsAhflInfo": [
+      {
+        "SL_PAN_AHFL_DS_CD_NM": "공고문",
+        "CMN_AHFL_NM": "다운로드",
+        "AHFL_URL": "다운로드"
+      },
+      {
+        "SL_PAN_AHFL_DS_CD_NM": "안내문 HWP",
+        "CMN_AHFL_NM": "입주자모집안내.hwp",
+        "AHFL_URL": "http://download.example/guide.hwp"
+      },
+      {
+        "SL_PAN_AHFL_DS_CD_NM": "공고문 PDF",
+        "CMN_AHFL_NM": "고양삼송_공고문.pdf",
+        "AHFL_URL": "http://download.example/notice.pdf"
+      }
+    ]
+  }
+]

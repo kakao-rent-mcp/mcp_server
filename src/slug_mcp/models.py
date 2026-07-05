@@ -19,6 +19,44 @@ class HouseCategory(StrEnum):
     REMAINDER = "remainder"  # 무순위/잔여세대
 
 
+class LhNoticeType(StrEnum):
+    """LH(한국토지주택공사) 분양·임대 공고유형.
+
+    HouseCategory와 같은 관례로, 값은 의미어이고 실제 API 코드(UPP_AIS_TP_CD)로의
+    변환은 도구 계층(tools/lh_lease.py)에서 한다.
+    """
+
+    LAND = "land"  # 토지
+    SALE_HOUSE = "sale_house"  # 분양주택
+    LEASE_HOUSE = "lease_house"  # 임대주택
+    HOUSING_WELFARE = "housing_welfare"  # 주거복지
+    STORE = "store"  # 상가
+    NEWLYWED_HOPE = "newlywed_hope"  # 신혼희망타운
+
+
+# LH 공고 지역코드(CNP_CD)는 행정표준 시도 코드를 따른다. 도구는 사용자가
+# 시도명(예: "경기")으로 넘기면 이 표에서 코드를 찾아 API 파라미터로 변환한다.
+LH_REGION_CODES: dict[str, str] = {
+    "서울": "11",
+    "부산": "26",
+    "대구": "27",
+    "인천": "28",
+    "광주": "29",
+    "대전": "30",
+    "울산": "31",
+    "세종": "36",
+    "경기": "41",
+    "강원": "42",
+    "충북": "43",
+    "충남": "44",
+    "전북": "45",
+    "전남": "46",
+    "경북": "47",
+    "경남": "48",
+    "제주": "50",
+}
+
+
 class MaritalStatus(StrEnum):
     """특별공급 유형 판단에 쓰이는 결혼·자녀 상태."""
 
