@@ -16,9 +16,14 @@ import textwrap
 from collections.abc import Callable
 from typing import Any, Literal, cast, get_args
 
+from dotenv import load_dotenv
 from fastmcp import FastMCP
 
-from .tools import competition, eligibility, notices, recommend
+from .tools import competition, eligibility, lh_lease, notices, recommend
+
+# .env의 서비스키(DECODING_KEY/ENCODING_KEY 등)를 프로세스 환경변수로 로드한다.
+# 이미 설정된 환경변수는 덮어쓰지 않는다(override=False 기본값).
+load_dotenv()
 
 _Transport = Literal["stdio", "http", "sse", "streamable-http"]
 _VALID_TRANSPORTS = get_args(_Transport)
@@ -50,6 +55,9 @@ _READ_LOCAL: dict[str, Any] = {**_READ_EXTERNAL, "openWorldHint": False}
 _TOOLS: tuple[tuple[Callable[..., Any], str, dict[str, Any]], ...] = (
     (notices.search_housing_notices, "분양 공고 검색", _READ_EXTERNAL),
     (notices.get_notice_detail, "분양 공고 상세 조회", _READ_EXTERNAL),
+    (lh_lease.search_lease_notices, "LH 분양·임대 공고 검색", _READ_EXTERNAL),
+    (lh_lease.get_lease_notice_detail, "LH 공고 상세 조회", _READ_EXTERNAL),
+    (lh_lease.extract_lease_notice_text, "LH 공고문 원문 추출", _READ_EXTERNAL),
     (competition.get_competition_stats, "경쟁률·당첨가점 조회", _READ_EXTERNAL),
     (eligibility.check_eligibility, "청약 자격 판정", _READ_LOCAL),
     (recommend.recommend_housing, "맞춤 청약 추천", _READ_EXTERNAL),

@@ -1,0 +1,30 @@
+[
+  { "dsSch": [{ "PAN_ST_DT": "20200308", "PAN_ED_DT": "20200508" }] },
+  {
+    "resHeader": [{ "SS_CODE": "Y", "RS_DTTM": "2020-05-08 10:00:00" }],
+    "dsList": [
+      {
+        "ALL_CNT": "2",
+        "RNUM": "1",
+        "PAN_SS": "접수마감",
+        "UPP_AIS_TP_NM": "분양주택",
+        "CNP_CD_NM": "경기",
+        "PAN_NT_ST_DT": "2020-03-10",
+        "CLSG_DT": "2020-04-01",
+        "PAN_ID": "0000059187",
+        "PAN_NM": "고양삼송 공공분양주택"
+      },
+      {
+        "ALL_CNT": "2",
+        "RNUM": "2",
+        "PAN_SS": "접수마감",
+        "UPP_AIS_TP_NM": "분양주택",
+        "CNP_CD_NM": "경기",
+        "PAN_NT_ST_DT": "2020-03-15",
+        "CLSG_DT": "2020-04-05",
+        "PAN_ID": "0000059200",
+        "PAN_NM": "수원 공공분양주택"
+      }
+    ]
+  }
+]

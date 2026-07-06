@@ -33,16 +33,20 @@ def _encoding_key() -> str:
     return key
 
 
-async def get(service: str, **params: object) -> dict:
+async def get(service: str, *, operation: str | None = None, **params: object) -> dict:
     """LH API를 호출한다.
 
     Args:
-        service: 서비스/오퍼레이션명 (예: lhLeaseNoticeInfo1). LH API는 경로가
-            `{service}/{service}` 형태로 한 번 더 반복된다.
+        service: 서비스명 (예: lhLeaseNoticeInfo1). LH API 경로는 `{service}/{operation}`
+            형태다.
+        operation: 오퍼레이션명. 대부분 service와 같아(예: lhLeaseNoticeInfo1)
+            생략하면 service를 그대로 쓴다. 상세조회처럼 두 번째 경로가 다른 경우
+            (lhLeaseNoticeDtlInfo1/getLeaseNoticeDtlInfo1)에만 명시한다.
         **params: PG_SZ, PAGE, PAN_ID 등 쿼리 파라미터 (serviceKey 제외)
     """
+    operation = operation or service
     query_string = urlencode(params)
-    url = f"{BASE_URL}/{service}/{service}?{query_string}&serviceKey={_encoding_key()}"
+    url = f"{BASE_URL}/{service}/{operation}?{query_string}&serviceKey={_encoding_key()}"
     async with httpx.AsyncClient(timeout=20) as client:
         response = await client.get(url)
         response.raise_for_status()
