@@ -28,6 +28,7 @@ def _complete_doc(**paths: object) -> dict:
             "residence_area": "서울",
             "residence_years_in_region": 4,
             "homeless_duration_months": 72,
+            "owned_house_count": 0,
             "marriage": {"is_married": True, "marriage_date": "2021-03-10"},
             "children_count": 2,
             "infants_count": 1,
@@ -84,9 +85,17 @@ def test_complete_profile_returns_full_output_schema():
 
 
 def test_filter01_homeowner_blocks_public_but_not_private_general():
-    """유주택자는 공공 전체·민영 특공 불가. 민영 일반공급(가점제)은 가능(스펙 §3 주의)."""
+    """유주택 세대(주택 수≥1)는 공공 전체·민영 특공 불가. 비규제 민영 가점제는 가능(스펙 §3)."""
     result = engine.analyze(
-        _complete_doc(**{"user_profile.homeless_duration_months": 0}), as_of=AS_OF
+        _complete_doc(
+            **{
+                "user_profile.owned_house_count": 1,
+                "user_profile.homeless_duration_months": 0,
+                "user_profile.residence_area": "부산",
+                "target_housing.target_region": "부산",
+            }
+        ),
+        as_of=AS_OF,
     )
     status = result["eligibility_status"]
     assert status["is_eligible_for_public"] is False
@@ -147,10 +156,12 @@ def test_filter03_not_applied_outside_regulated_regions():
 
 
 def test_regulated_region_detection_uses_dynamic_config():
-    """'강남3구·용산' 하드코딩 금지 — 10.15 대책의 서울 전역+경기 12곳 목록으로 판정."""
+    """'강남3구·용산' 하드코딩 금지 — 서울 전역+경기 15곳(2026-07-01 추가 반영) 목록으로 판정."""
     assert engine.is_regulated_region("서울 노원구") is True  # 서울 전역
-    assert engine.is_regulated_region("경기 하남") is True  # 경기 12곳
+    assert engine.is_regulated_region("경기 하남") is True  # 경기 15곳
     assert engine.is_regulated_region("성남 분당") is True
+    assert engine.is_regulated_region("화성 동탄") is True  # 2026-07-01 추가 (B-1)
+    assert engine.is_regulated_region("구리") is True  # 2026-07-01 추가 (B-1)
     assert engine.is_regulated_region("경기 평택") is False
     assert engine.is_regulated_region("부산") is False
 
@@ -158,10 +169,14 @@ def test_regulated_region_detection_uses_dynamic_config():
 # --- §4 공공분양 분기 ---------------------------------------------------------
 
 
-def test_public_recognized_balance_caps_monthly_payment():
-    """월 25만원 인정 상한: 납입횟수 70회면 인정총액은 최대 1,750만원."""
+def test_public_recognized_balance_applies_25man_cap_with_retroactive_10man():
+    """월 인정 상한: 2024-11-01 전 회차는 10만원, 이후는 25만원(부칙 소급 — B-10).
+
+    가입 72개월·납입 70회, as_of=2026-07-05 → 시행 전 52개월분 10만, 이후 18회 25만
+    → 52×10만 + 18×25만 = 9,700,000원.
+    """
     result = engine.analyze(_complete_doc(), as_of=AS_OF)
-    assert result["scores"]["public_balance_recognized_krw"] == 17_500_000
+    assert result["scores"]["public_balance_recognized_krw"] == 9_700_000
 
 
 def test_public_rank1_in_regulated_region_uses_overheated_requirement():
@@ -197,26 +212,44 @@ def test_newborn_requires_child_under_2():
 
 
 def test_newlywed_scored_within_7_years():
+    """일반형(별표 6) 13점: 소득1 + 자녀2(→2) + 거주4년(→3) + 납입70회(→3) + 혼인5.3년(→1) = 10."""
     result = engine.analyze(_complete_doc(), as_of=AS_OF)
     newlywed = result["scores"]["special_supply_scores"]["newlywed"]
-    # 소득 85.2%(→2) + 거주 4년(→3) + 납입 70회(→3) = 우선공급 경쟁 8점
-    assert newlywed["priority_total"] == 8
-    # 거주3 + 납입3 + 자녀2명(→2) + 무주택 6년(→3) = 일반공급 경쟁 11점
-    assert newlywed["general_total"] == 11
+    assert newlywed["total"] == 10
+    assert newlywed["max"] == 13
+    assert newlywed["rank"] == 1  # 혼인 중 자녀 있음 → 1순위
 
 
-def test_newlywed_excluded_after_7_years():
+def test_newlywed_excluded_after_7_years_without_young_child():
+    """혼인 7년 초과 + 6세 이하 자녀 없음 → 신혼 특공 자격 없음(6세 이하 자녀 있으면 B-6로 자격)."""
+    result = engine.analyze(
+        _complete_doc(
+            **{
+                "user_profile.marriage.marriage_date": "2015-01-01",
+                "user_profile.has_child_under_2": False,
+                "user_profile.infants_count": 0,
+                "user_profile.children_count": 0,
+            }
+        ),
+        as_of=AS_OF,
+    )
+    assert result["scores"]["special_supply_scores"]["newlywed"] is None
+
+
+def test_newlywed_eligible_over_7_years_with_child_under_6():
+    """혼인 7년 초과라도 6세 이하 자녀가 있으면 신혼 특공 자격(B-6)."""
     result = engine.analyze(
         _complete_doc(**{"user_profile.marriage.marriage_date": "2015-01-01"}), as_of=AS_OF
     )
-    assert result["scores"]["special_supply_scores"]["newlywed"] is None
+    assert result["scores"]["special_supply_scores"]["newlywed"] is not None
 
 
 def test_multi_child_score_matches_table():
     result = engine.analyze(_complete_doc(), as_of=AS_OF)
     multi = result["scores"]["special_supply_scores"]["multi_child"]
-    # 자녀2(25) + 영유아1(5) + 무주택6년(15) + 거주4년(5) + 통장6년(3) = 53
-    assert multi["total"] == 53
+    # 자녀2(25) + 영유아1(5) + 무주택6년(15) + 거주4년(5) + 통장6년(0, 10년 미만) = 50
+    assert multi["total"] == 50
+    assert multi["account_period"] == 0  # B-4: 10년 미만은 0점(5~10년 3점 구간 제거)
 
 
 def test_multi_child_requires_two_children():
@@ -228,9 +261,13 @@ def test_multi_child_requires_two_children():
 
 
 def test_private_general_score_matches_spec_example():
-    """스펙 §7 예시와 동일 프로필 → 가점 45점 (무주택14 + 부양20 + 통장11)."""
+    """무주택기간 30세/혼인 기산 상한(C-1) 적용 → 가점 43점 (무주택12 + 부양20 + 통장11).
+
+    혼인 2021-03(as_of 2026-07 기준 5.3년) 기산 → 무주택 인정 63개월=5년 → 12점(입력 72개월 아님).
+    """
     result = engine.analyze(_complete_doc(), as_of=AS_OF)
-    assert result["scores"]["private_general_score"] == 45
+    assert result["scores"]["private_general_score"] == 43
+    assert result["scores"]["private_score_breakdown"]["homeless_period"] == 12
 
 
 def test_private_rank1_deposit_shortfall():
@@ -268,7 +305,7 @@ def test_forced_matching_provides_gap_and_alternatives():
     )
     forced = result["matching_analysis"]["forced_matching"]
     assert forced is not None
-    assert forced["private_score_gap"] == 69 - 45
+    assert forced["private_score_gap"] == 69 - 43
     assert result["matching_analysis"]["alternatives"], "S급 미달이면 대안 지역을 제시해야 한다"
 
 
@@ -306,3 +343,116 @@ def test_marriage_date_missing_still_scores_newlywed_with_note():
     )
     assert result["scores"]["special_supply_scores"]["newlywed"] is not None
     assert any("혼인" in note for note in result["verification_notes"])
+
+
+# --- 2026-07-06 정합성 수정: 주택수·통장유형·소득·예치금·가입기간·자산범위 게이트 ---
+
+
+def test_owned_house_count_is_required():
+    doc = _complete_doc()
+    del doc["user_profile"]["owned_house_count"]
+    result = engine.analyze(doc, as_of=AS_OF)
+    assert result["status"] == "needs_more_info"
+    assert any(
+        item["field"] == "user_profile.owned_house_count"
+        for item in result["missing_required_fields"]
+    )
+
+
+def test_two_house_household_blocked_from_regulated_rank1():
+    """규제지역 2주택 이상 세대는 1순위 배제 (C-6)."""
+    result = engine.analyze(_complete_doc(**{"user_profile.owned_house_count": 2}), as_of=AS_OF)
+    status = result["eligibility_status"]
+    assert status["is_eligible_for_private_rank1"] is False
+    assert any("2주택" in r["filter"] for r in status["disqualification_reasons"])
+
+
+def test_account_type_public_savings_blocks_private():
+    """청약저축은 국민(공공)주택만 → 민영 트랙 제외 (C-5)."""
+    result = engine.analyze(
+        _complete_doc(**{"subscription_account.account_type": "public_savings"}), as_of=AS_OF
+    )
+    assert result["eligibility_status"]["is_eligible_for_private"] is False
+
+
+def test_account_type_private_deposit_blocks_public():
+    """청약예금은 민영주택만 → 공공·특공 트랙 제외 (C-5)."""
+    result = engine.analyze(
+        _complete_doc(**{"subscription_account.account_type": "private_deposit"}), as_of=AS_OF
+    )
+    assert result["eligibility_status"]["is_eligible_for_public"] is False
+    assert result["scores"]["special_supply_scores"]["newborn"] is None
+
+
+def test_special_supply_requires_subscription_account():
+    """청약통장이 없으면 특별공급 배점을 계산하지 않는다 (A-9)."""
+    result = engine.analyze(
+        _complete_doc(
+            **{
+                "subscription_account.duration_months": 0,
+                "subscription_account.payment_count": 0,
+            }
+        ),
+        as_of=AS_OF,
+    )
+    scores = result["scores"]["special_supply_scores"]
+    assert scores["newborn"] is None
+    assert scores["newlywed"] is None
+    assert scores["multi_child"] is None
+
+
+def test_newlywed_income_cap_excludes_high_earner():
+    """소득 상한 초과 외벌이는 신혼 특공 대상 아님 (A-2)."""
+    result = engine.analyze(
+        _complete_doc(
+            **{
+                "user_profile.income_and_assets.monthly_income_krw": 15_000_000,
+                "user_profile.income_and_assets.is_dual_income": False,
+            }
+        ),
+        as_of=AS_OF,
+    )
+    assert result["scores"]["special_supply_scores"]["newlywed"] is None
+
+
+def test_asset_excess_blocks_special_supply_regardless_of_size():
+    """자산 초과는 84㎡ 특공에도 적용된다 (B-9: 특공 전체 면적무관)."""
+    result = engine.analyze(
+        _complete_doc(
+            **{
+                "target_housing.desired_size_sqm": 84.0,
+                "user_profile.income_and_assets.total_real_estate_krw": 300_000_000,
+            }
+        ),
+        as_of=AS_OF,
+    )
+    scores = result["scores"]["special_supply_scores"]
+    assert scores["newborn"] is None
+    assert scores["newlywed"] is None
+    assert scores["multi_child"] is None
+
+
+def test_sejong_deposit_uses_other_region_tier():
+    """세종은 기타지역(85㎡↓ 200만원) — 광역시(250만원)로 취급하면 안 됨 (B-11)."""
+    result = engine.analyze(
+        _complete_doc(
+            **{
+                "user_profile.residence_area": "세종",
+                "target_housing.target_region": "세종",
+                "subscription_account.total_balance_krw": 2_200_000,
+            }
+        ),
+        as_of=AS_OF,
+    )
+    # 200만원 기준 충족(2.2백만) → 1순위. tier2(250만)였다면 미달로 박탈될 값.
+    assert result["eligibility_status"]["is_eligible_for_private_rank1"] is True
+
+
+def test_private_rank1_requires_subscription_duration():
+    """민영 1순위는 예치금 외 가입기간도 필요 (A-1). 규제지역 24개월 미달 → 2순위."""
+    result = engine.analyze(
+        _complete_doc(**{"subscription_account.duration_months": 12}), as_of=AS_OF
+    )
+    status = result["eligibility_status"]
+    assert status["is_eligible_for_private_rank1"] is False
+    assert any("가입" in r["reason"] for r in status["disqualification_reasons"])

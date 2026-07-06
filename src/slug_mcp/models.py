@@ -105,9 +105,26 @@ class IncomeAssets(BaseModel):
     car_value_krw: int | None = Field(default=None, ge=0, description="세대 보유 자동차 가액 (원)")
 
 
+class AccountType(StrEnum):
+    """청약통장 유형. 유형별로 신청 가능한 주택이 다르다.
+
+    2015-09-01부터 주택청약종합저축만 신규 가입 가능하며, 종전 통장은 유지·전환된다.
+    """
+
+    COMPREHENSIVE = "comprehensive"  # 주택청약종합저축 — 국민·민영 전부
+    PUBLIC_SAVINGS = "public_savings"  # 청약저축 — 국민(공공)주택만
+    PRIVATE_DEPOSIT = "private_deposit"  # 청약예금 — 민영주택만
+    PRIVATE_INSTALLMENT = "private_installment"  # 청약부금 — 전용 85㎡ 이하 민영만
+
+
 class SubscriptionAccount(BaseModel):
     """청약통장 현황. 공공은 납입횟수·인정총액, 민영은 예치금(총액)·가입기간이 핵심."""
 
+    account_type: AccountType = Field(
+        default=AccountType.COMPREHENSIVE,
+        description="청약통장 유형. 종합저축은 전부 신청 가능, 청약저축은 국민(공공)만, "
+        "청약예금은 민영만, 청약부금은 전용 85㎡ 이하 민영만. 미입력 시 종합저축으로 가정",
+    )
     duration_months: int | None = Field(
         default=None, ge=0, description="본인 청약통장 가입기간 (개월). 통장이 없으면 0"
     )
@@ -135,6 +152,12 @@ class UserProfile(BaseModel):
     )
     homeless_duration_months: int | None = Field(
         default=None, ge=0, description="무주택 기간(개월). 유주택자는 0"
+    )
+    owned_house_count: int | None = Field(
+        default=None,
+        ge=0,
+        description="세대가 보유한 주택 수(분양권·입주권 포함). 0=무주택세대. "
+        "무주택 여부와 2주택 이상 세대 1순위 제한 판정에 사용(무주택기간 가점과 별개)",
     )
     marriage: Marriage = Field(default_factory=Marriage)
     children_count: int | None = Field(
@@ -167,11 +190,19 @@ class ProfileDocument(BaseModel):
 REQUIRED_FIELD_QUESTIONS: dict[str, str] = {
     "user_profile.age": "만 나이가 어떻게 되세요?",
     "user_profile.residence_area": "주민등록상 거주하시는 시·도가 어디인가요? (예: 서울, 경기)",
+    "user_profile.owned_house_count": (
+        "현재 세대가 보유한 주택이 몇 채인가요? (분양권·입주권 포함, 없으면 0)"
+    ),
     "user_profile.homeless_duration_months": (
-        "무주택 기간이 몇 개월인가요? 현재 주택을 보유 중이면 0으로 알려주세요."
+        "무주택 기간이 몇 개월인가요? 만 30세(또는 그 전 혼인신고일)부터, 주택을 처분한 "
+        "적이 있으면 처분 후 무주택자가 된 날부터 셉니다. 유주택이면 0."
     ),
     "user_profile.marriage.is_married": "혼인신고 기준으로 기혼이신가요?",
-    "user_profile.dependents_count": "본인을 제외한 부양가족(배우자·자녀·부모님 등)이 몇 명인가요?",
+    "user_profile.dependents_count": (
+        "본인 제외 부양가족이 몇 명인가요? 같은 주민등록표의 배우자·자녀와, 본인이 "
+        "세대주로 3년 이상 함께 등재된 직계존속만 셉니다(직계존속 부부 중 한 명이라도 "
+        "주택 보유 시 제외, 혼인한 자녀 제외)."
+    ),
     "user_profile.income_and_assets.monthly_income_krw": (
         "가구 세전 월평균 소득이 얼마인가요? (원 단위)"
     ),
@@ -204,6 +235,9 @@ OPTIONAL_FIELD_QUESTIONS: dict[str, str] = {
         "배우자 청약통장 가입기간이 몇 개월인가요? (민영 가점 최대 +3점)"
     ),
     "target_housing.desired_size_sqm": "희망 전용면적이 몇 ㎡인가요? (예: 59, 84)",
+    "subscription_account.account_type": (
+        "청약통장 종류가 무엇인가요? (주택청약종합저축/청약저축/청약예금/청약부금, 대부분 종합저축)"
+    ),
 }
 
 

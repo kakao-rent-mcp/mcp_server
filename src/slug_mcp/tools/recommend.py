@@ -115,6 +115,8 @@ async def recommend_housing(
     scores = analysis["scores"]
     matching = analysis["matching_analysis"]
     special = scores["special_supply_scores"]
+    # 특공 배점은 엔진이 소득·통장·자산 게이트를 통과한 경우에만 non-None이 되므로,
+    # special이 채워졌다는 것은 해당 공공 특공 자격이 있다는 뜻이다(§5 파급 정합).
     public_ok = eligibility["is_eligible_for_public"] or any(
         special[key] is not None for key in ("newborn", "newlywed", "multi_child")
     )

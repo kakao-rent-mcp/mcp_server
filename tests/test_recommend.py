@@ -39,6 +39,7 @@ def _complete_patch(**overrides: object) -> dict:
             "residence_area": "경기",
             "residence_years_in_region": 4,
             "homeless_duration_months": 72,
+            "owned_house_count": 0,
             "marriage": {"is_married": True, "marriage_date": "2021-03-10"},
             "children_count": 2,
             "infants_count": 1,
@@ -105,18 +106,19 @@ async def test_recommend_ranks_public_notice_for_eligible_user():
     assert "Probability" in top["feasibility"]
     assert top["past_competition"], "과거 경쟁률이 붙어 있어야 한다"
     # 프로필 요약과 검증 주의도 함께 돌려줘 클라이언트 AI가 설명에 쓸 수 있게 한다
-    assert result["analysis_summary"]["private_general_score"] == 45
+    assert result["analysis_summary"]["private_general_score"] == 43  # C-1 무주택 기산 상한
     assert result["verification_notes"]
 
 
 @respx.mock
 async def test_recommend_skips_public_notice_for_homeowner():
-    """유주택자(공공 전체 부적격)는 '국민' 공고가 추천에서 걸러져야 한다."""
+    """유주택 세대(주택 수≥1, 공공 전체 부적격)는 '국민' 공고가 추천에서 걸러져야 한다."""
     _mock_odcloud_routes()
     session_id, _ = store_module.default_store.upsert(
         None,
         _complete_patch(
             **{
+                "user_profile.owned_house_count": 1,
                 "user_profile.homeless_duration_months": 0,
                 "user_profile.has_child_under_2": False,
                 "user_profile.children_count": 0,

@@ -58,8 +58,8 @@
 | 1-2 Inspector 사전 점검 | ⬜ 미실시 | README에 계획만 명시됨 |
 | 1-3 활발한 SDK | ✅ 충족 | FastMCP |
 | 1-4 "kakao" 네이밍 금지 | ✅ 충족 | 서버명 `slug-mcp`, 도구명 확인됨 |
-| 2-1 툴 이름 규칙 | ✅ 충족 | 7개 도구 모두 조건 만족 — `tests/test_server.py`가 자동 검증 |
-| 2-2 툴 개수(3~10 권장) | ✅ 충족 | 7개 |
+| 2-1 툴 이름 규칙 | ✅ 충족 | 10개 도구 모두 조건 만족 — `tests/test_server.py`가 자동 검증 |
+| 2-2 툴 개수(3~10 권장) | ✅ 충족 | 10개 (권장 범위 상한 — 더 늘리면 초과, [ADR-002](architecture-decisions.md#adr-002)) |
 | 2-3 annotations 5종 | ✅ 충족 | `server.py`의 `_READ_EXTERNAL` / `_READ_LOCAL` / `_WRITE_LOCAL` — `tests/test_server.py`가 자동 검증 |
 | 2-4 서비스명 병기 | ✅ 충족 | `[슬러그(Slug)]` 접두 |
 | 2-4 영문 작성 권장 | ⚠️ 부분 충족 | 서비스명은 국·영문 병기지만 description 본문은 한글 |
