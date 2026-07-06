@@ -1,13 +1,17 @@
 # slug-mcp
 
-한국 주택 청약(분양·임대) 공고를 조회하고, 사용자의 소득·자산·가족구성·청약통장 정보를
-바탕으로 자격에 맞는 공고를 추천하는 [FastMCP](https://github.com/jlowin/fastmcp) 서버입니다.
+한국 주택 청약 공고를 조회하고, 사용자의 소득·자산·가족구성·청약통장 정보를 바탕으로
+자격·가점을 판정해 당첨 가능성이 높은 공고를 추천하는
+[FastMCP](https://github.com/jlowin/fastmcp) 서버입니다.
 
 이 서버는 자연어를 직접 파싱하지 않습니다. 자연어 이해는 MCP 클라이언트(사용자 쪽 AI)가
-담당하고, 이 서버는 클라이언트가 구조화해서 넘긴 값(연봉, 가구원수, 결혼상태 등)을 받아
-공공데이터포털 API 조회 + 자격판정 로직을 수행합니다.
+담당하고, 이 서버는 클라이언트가 구조화해서 넘긴 값(나이, 소득, 무주택기간 등)을 받아
+세션에 누적 저장하고, 룰 엔진 판정 + 공공데이터포털 API 조회를 수행합니다.
+금액 단위는 전부 원(KRW)이며 필드명에 `_krw`가 붙습니다.
 
 카카오 PlayMCP 마켓 심사 규격을 전제로 만들었습니다 (아래 [PlayMCP 심사 규격](#playmcp-심사-규격) 참고).
+
+프로젝트 배경(제품 컨셉, 대회 규정, 아키텍처 결정 기록)은 [docs/](docs/README.md)에 정리되어 있습니다.
 
 ## 빠른 시작
 
@@ -38,8 +42,42 @@ uv run slug-mcp
 | `search_housing_notices` | 지역·유형으로 진행 중인 분양 공고 목록 검색 |
 | `get_notice_detail` | 공고 하나의 상세정보 + 주택형별 분양가·면적 |
 | `get_competition_stats` | 공고의 과거 경쟁률·당첨가점·특별공급 신청현황 |
-| `check_eligibility` | 사용자 프로필로 특정 공급유형 자격 여부 판정 |
-| `recommend_housing` | 위 도구들을 조합해 자격·경쟁력 순으로 공고 추천 (핵심 기능) |
+| `update_my_profile` | 대화에서 파악한 사용자 정보를 세션에 누적 저장 (부분 업데이트) |
+| `get_my_profile` | 저장된 프로필과 완성도(부족 항목·다음 질문) 조회 |
+| `analyze_my_subscription` | 룰 엔진 종합 판정: 자격 필터 → 가점·배점 → 컷오프 대조 → 트랙 추천 |
+| `recommend_housing` | 프로필 분석 + 실시간 공고·경쟁률을 결합해 실현가능성 순 추천 (핵심 기능) |
+
+### 사용 흐름 (대화 몇 번이면 끝)
+
+```
+사용자: "34살, 서울 살고 결혼했어요. 마포 쪽 청약 노려요"
+  → update_my_profile(...)           # 부분 저장, 응답의 next_questions로 부족한 정보 안내
+사용자: "무주택 6년차, 월소득 750, 통장 6년에 1,800만원요"
+  → update_my_profile(session_id, ...)  # ready_for_analysis=true
+  → analyze_my_subscription(session_id) # 민영 가점 45/84, 신생아·신혼·다자녀 특공 매칭 등
+  → recommend_housing(session_id)       # 진행 중 공고를 실현가능성 순으로 추천
+```
+
+프로필은 **인메모리 문서 스토어**(세션ID 키, TTL 24시간, LRU 상한)에 보관합니다.
+배포 환경(KC 클라우드)에 외부 DB를 붙일 수 없어 프로세스 메모리를 쓰며, 서버 재시작
+시 사라집니다. MCP transport 자체는 stateless(PlayMCP 권장)를 유지하고 애플리케이션
+수준의 상태만 세션ID로 이어 붙입니다 — 결정 배경은
+[docs/architecture-decisions.md ADR-003](docs/architecture-decisions.md#adr-003) 참고.
+
+### 룰 엔진
+
+자격판정·가점계산은 [docs/subscription-policy-spec.md](docs/subscription-policy-spec.md)
+명세를 구현한 것입니다 (구현: `engine.py`, `scoring.py`, 기준값: `config/eligibility_rules.yaml`).
+
+- **Hard Filter**: 무주택(유주택자는 공공 전체·민영 특공 차단, 민영 일반은 가점 0점),
+  공공 60㎡ 이하 자산 컷, 규제지역 세대주 요건(서울 전역+경기 12곳 동적 목록)
+- **민영 가점 84점**: 무주택기간 32 + 부양가족 35 + 통장 가입기간 17(배우자 합산)
+- **공공 특별공급 배점**: 신생아(우선70/일반20/추첨10 소득트랙), 신혼부부(LH 배점표:
+  우선 9점/일반 12점), 다자녀(100점 만점)
+- **컷오프 대조**: 목표지역 S/A/B/C 등급별 예상 컷 + `recommend_housing`이 과거
+  당첨가점 실측값으로 보정, 미달 시 우회 전략(추첨형 특공·대형 평형·대안 지역) 제시
+- 🟡(원문 재확인 필요) 규칙이 판정에 관여하면 `verification_notes`에 경고를 담아
+  돌려줍니다. 🔴(미검증) 규칙은 로직에 넣지 않았습니다.
 
 ## PlayMCP 심사 규격
 
@@ -60,17 +98,25 @@ uv run slug-mcp
 
 ## 알려진 미완성 부분 (같이 다듬어야 할 것)
 
-- **소득기준표가 비어 있습니다.** `src/slug_mcp/config/eligibility_rules.yaml`의
-  `median_monthly_income_by_household_size`가 빈 값입니다. 통계청 KOSIS 또는
-  청약홈이 매년 발표하는 확정표로 채워야 소득 조건이 정상 판정됩니다. 채우기 전까지
-  `check_eligibility`는 소득 조건을 `needs_manual_review=True`로 표시하고 넘어갑니다.
-- **자산 상한·예치금표는 2026-07-01 웹 검색으로 확인한 값입니다.** 실서비스 반영 전
-  yaml 파일 상단 출처(국가법령정보센터, 청약홈)로 재확인해주세요. 법령 개정 시 갱신 필요.
-- **공공주택 청약통장 1순위 판정이 수도권/비수도권 2단계만 구분합니다.** 투기과열지구 등
-  세분화하려면 지역코드 매핑이 더 필요합니다.
-- **LH `lhLeaseNoticeBfhDtllInfo1`(분양임대공고별 상세정보, 사전청약) 오퍼레이션은
-  아직 서버에서 HTTP 500을 반환하는 상태**라 `clients/lh.py`에만 있고 도구로는
-  연결하지 않았습니다. LH 쪽 이슈가 풀리면 `tools/`에 상세조회 도구를 추가하면 됩니다.
+- **⚠️ 2026-07-06 데이터 정합성 전수조사에서 오류가 다수 확인됐습니다.** 규제지역
+  목록(2026-07-01 추가분 경기 3곳 누락), 특공 소득 판정에 임대주택용 소득표 혼입,
+  민영 1순위 가입기간 미검사, 다자녀 가입기간 배점의 존재하지 않는 구간 등 —
+  전체 목록·근거·영향은 [docs/data-integrity-audit.md](docs/data-integrity-audit.md)
+  참고. 해당 감사는 기록만 하며 코드 수정은 후속 작업입니다.
+- **기준값 yaml은 사람이 갱신해야 합니다.** 소득표(`urban_worker_monthly_income_krw`)는
+  LH청약플러스 2025년도 적용분(2026-07-05 확인), 자산 상한은 2026-02-27 공고분,
+  규제지역 목록은 2025-10-15 대책 기준입니다. 매년/고시 개정 시
+  `config/eligibility_rules.yaml`과 [정책 명세](docs/subscription-policy-spec.md)의
+  검증 태그를 함께 갱신하세요.
+- **🔴 미검증이던 규칙 2건은 2026-07-06 웹 검증으로 공식 확인됐습니다.** 미성년자
+  통장 가입기간 인정 최대 5년(규칙 제10조⑥, 2024-07-01 시행), 민영·국민주택
+  신생아특공 신설(제35조의3, 2026-06-15 시행). 둘 다 아직 미구현이며, 반영 계획은
+  [감사 문서](docs/data-integrity-audit.md)의 후속 조치 참고.
+- **프로필 저장은 프로세스 메모리입니다.** 서버 재시작·스케일아웃 시 세션이 사라집니다.
+  단일 컨테이너 배포 전제이며, 다중 인스턴스가 필요해지면 외부 스토어 검토가 필요합니다.
+- **임대 도메인은 미구현입니다.** LH `lhLeaseNoticeBfhDtllInfo1`(분양임대공고별
+  상세정보, 사전청약) 오퍼레이션은 아직 서버에서 HTTP 500을 반환하는 상태라
+  `clients/lh.py`에만 있고 도구로는 연결하지 않았습니다.
 
 ## 테스트
 
@@ -78,8 +124,18 @@ uv run slug-mcp
 uv run pytest -v
 ```
 
-정부 API는 개인 서비스키가 있어야 하고 요청 제한도 있어서, 테스트는 `tests/fixtures/`에
-저장해 둔 실제 응답 녹화본으로 동작합니다. 서비스키 없이도 항상 돌아갑니다.
+정부 API는 개인 서비스키가 있어야 하고 요청 제한도 있어서, 네트워크가 필요한 테스트는
+`tests/fixtures/`에 저장해 둔 실제 응답 녹화본으로 동작합니다. 서비스키 없이도 항상
+돌아갑니다. 룰 엔진(스토어·스코어링·파이프라인)은 순수 계산이라 목킹 없이 검증합니다.
+
+| 테스트 | 검증 대상 |
+|---|---|
+| `test_store.py` | 인메모리 세션 스토어 (deep merge·TTL·LRU) |
+| `test_scoring.py` | 민영 84점 가점, 특공 배점표, 소득비율 |
+| `test_engine.py` | Hard Filter → 트랙 분기 → 컷오프·강제매칭 파이프라인 |
+| `test_profile_tools.py` / `test_analyze_tool.py` | 대화형 프로필 설정·분석 도구 |
+| `test_notices.py` / `test_competition.py` / `test_recommend.py` | 공공데이터 API 도구 (fixture 목킹) |
+| `test_server.py` | PlayMCP 심사 규격 (도구 수·이름·annotations·description) |
 
 ```bash
 uv run ruff check .        # 린트
@@ -137,6 +193,7 @@ docker run -d --name slug-mcp -p 8000:8000 --env-file .env slug-mcp
 
 ## 기여
 
-기준값(yaml)이나 판정 로직을 고칠 때는 반드시 `tests/test_eligibility.py`도 같이
-갱신해주세요. 새 API 오퍼레이션을 도구로 추가할 때는 `tests/fixtures/`에 실제 응답
+기준값(yaml)이나 판정 로직을 고칠 때는 반드시 `tests/test_scoring.py`·
+`tests/test_engine.py`와 [정책 명세](docs/subscription-policy-spec.md)의 검증 태그도
+같이 갱신해주세요. 새 API 오퍼레이션을 도구로 추가할 때는 `tests/fixtures/`에 실제 응답
 샘플을 저장해두면 다른 사람이 검증하기 쉽습니다.
