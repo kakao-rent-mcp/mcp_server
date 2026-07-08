@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from .. import engine
@@ -15,6 +16,32 @@ from .. import store as store_module
 from ..models import HouseCategory
 from . import competition as competition_tools
 from . import notices as notices_tools
+
+_KST = timezone(timedelta(hours=9))
+
+
+def _today_kst() -> str:
+    """오늘 날짜(KST)를 공고 접수일 형식(YYYY-MM-DD)으로 돌려준다.
+
+    KC 컨테이너가 UTC로 돌아도 하루가 어긋나지 않도록 한국시간으로 고정한다.
+    """
+    return datetime.now(_KST).strftime("%Y-%m-%d")
+
+
+def _application_status(notice: dict[str, Any], today: str) -> str:
+    """오늘(KST) 기준 청약 접수 상태: 접수중 | 접수전 | 마감.
+
+    접수일(RCEPT_BGNDE~RCEPT_ENDDE)은 YYYY-MM-DD 문자열이라 사전식 비교로 판정한다.
+    날짜가 비어 있으면(판정 불가) 마감으로 단정하지 않고 접수중으로 둔다.
+    """
+    begin = str(notice.get("RCEPT_BGNDE", ""))
+    end = str(notice.get("RCEPT_ENDDE", ""))
+    if end and end < today:
+        return "마감"
+    if begin and begin > today:
+        return "접수전"
+    return "접수중"
+
 
 _SIDO_TOKENS = (
     "서울",
@@ -89,8 +116,8 @@ async def recommend_housing(
 
     동작 순서:
     1. 세션 프로필을 룰 엔진으로 분석한다 (부족하면 물어볼 질문을 돌려준다).
-    2. 목표지역 시·도로 공고 후보를 수집하고, 공고의 국민/민영 구분별로
-       자격 없는 트랙(예: 유주택자의 공공분양)을 걸러낸다.
+    2. 목표지역 시·도로 공고 후보를 수집하고, 접수 마감된 공고(신청 불가)와
+       국민/민영 구분상 자격 없는 트랙(예: 유주택자의 공공분양)을 걸러낸다.
     3. 공고별 과거 경쟁률·당첨가점을 붙이고, 당첨가점 실측값이 있으면 예상
        컷오프를 보정해 실현가능성(Probability)을 매긴 뒤 높은 순으로 추천한다.
 
@@ -130,12 +157,18 @@ async def recommend_housing(
     candidates = search_result.get("data", [])
 
     cutoffs = matching["expected_cutoffs"]
+    today = _today_kst()
 
-    # 1) 자격 트랙으로 먼저 걸러낸다 (여긴 API 호출 없음).
+    # 1) 마감 공고와 자격 없는 트랙을 먼저 걸러낸다 (여긴 API 호출 없음).
+    #    접수가 끝난 공고는 신청 자체가 불가능하므로 추천 대상에서 뺀다(접수중·접수전만 남김).
     eligible: list[tuple[dict[str, Any], str]] = []
     skipped = 0
+    skipped_closed = 0
     for notice in candidates:
         if not notice.get("HOUSE_MANAGE_NO"):
+            continue
+        if _application_status(notice, today) == "마감":
+            skipped_closed += 1
             continue
         track = _notice_track(notice)
         if (track == "public" and not public_ok) or (track == "private" and not private_ok):
@@ -180,6 +213,7 @@ async def recommend_housing(
             {
                 "notice": notice,
                 "track": track,
+                "application_status": _application_status(notice, today),
                 "feasibility": engine.feasibility_label(pct),
                 "feasibility_pct": pct,
                 "observed_private_cutoff": observed_cutoff,
@@ -194,6 +228,7 @@ async def recommend_housing(
     return {
         "status": "ok",
         "total_candidates_scanned": len(candidates),
+        "skipped_closed_count": skipped_closed,
         "skipped_ineligible_count": skipped,
         "analysis_summary": {
             "private_general_score": scores["private_general_score"],

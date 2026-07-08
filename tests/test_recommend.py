@@ -30,6 +30,12 @@ def _fresh_store(monkeypatch):
     monkeypatch.setattr(store_module, "default_store", ProfileStore())
 
 
+@pytest.fixture(autouse=True)
+def _frozen_today(monkeypatch):
+    # 공고 접수일 기준 '오늘'을 고정해, 시간이 지나도 마감 판정이 흔들리지 않게 한다.
+    monkeypatch.setattr(recommend, "_today_kst", lambda: "2026-07-08")
+
+
 def _complete_patch(**overrides: object) -> dict:
     doc: dict = {
         "target_housing": {"target_region": "경기 고양", "desired_size_sqm": 59.0},
@@ -102,6 +108,7 @@ async def test_recommend_ranks_public_notice_for_eligible_user():
     top = result["recommendations"][0]
     assert top["notice"]["HOUSE_MANAGE_NO"] == "2026000320"
     assert top["track"] == "public"  # 고양창릉 공고는 '국민'
+    assert top["application_status"] == "접수전"  # 접수시작 2026-07-20 (오늘 2026-07-08)
     assert "Probability" in top["feasibility"]
     assert top["past_competition"], "과거 경쟁률이 붙어 있어야 한다"
     # 프로필 요약과 검증 주의도 함께 돌려줘 클라이언트 AI가 설명에 쓸 수 있게 한다
@@ -129,3 +136,24 @@ async def test_recommend_skips_public_notice_for_homeowner():
     assert result["status"] == "ok"
     assert result["recommendations"] == []
     assert result["skipped_ineligible_count"] == 1
+
+
+@respx.mock
+async def test_recommend_excludes_closed_notice():
+    """접수가 끝난 공고는 신청 불가이므로 추천에서 빠지고 skipped_closed_count로 집계된다."""
+    detail = _load_fixture("apt_lttot_pblanc_detail.json")
+    detail["data"][0] = {
+        **detail["data"][0],
+        "RCEPT_BGNDE": "2026-05-01",
+        "RCEPT_ENDDE": "2026-05-10",  # 오늘(2026-07-08) 이전이라 마감
+    }
+    respx.get("https://api.odcloud.kr/api/ApplyhomeInfoDetailSvc/v1/getAPTLttotPblancDetail").mock(
+        return_value=httpx.Response(200, json=detail)
+    )
+    session_id, _ = store_module.default_store.upsert(None, _complete_patch())
+
+    result = await recommend.recommend_housing(session_id, max_candidates_to_scan=5)
+
+    assert result["status"] == "ok"
+    assert result["recommendations"] == []
+    assert result["skipped_closed_count"] == 1
