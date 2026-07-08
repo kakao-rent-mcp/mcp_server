@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 
 from .. import engine
@@ -129,18 +130,33 @@ async def recommend_housing(
     candidates = search_result.get("data", [])
 
     cutoffs = matching["expected_cutoffs"]
-    evaluated: list[dict[str, Any]] = []
+
+    # 1) 자격 트랙으로 먼저 걸러낸다 (여긴 API 호출 없음).
+    eligible: list[tuple[dict[str, Any], str]] = []
     skipped = 0
     for notice in candidates:
-        house_manage_no = notice.get("HOUSE_MANAGE_NO")
-        if not house_manage_no:
+        if not notice.get("HOUSE_MANAGE_NO"):
             continue
         track = _notice_track(notice)
         if (track == "public" and not public_ok) or (track == "private" and not private_ok):
             skipped += 1
             continue
+        eligible.append((notice, track))
 
-        stats = await competition_tools.get_competition_stats(house_manage_no)
+    # 2) 자격 있는 공고들의 경쟁률·가점·특공을 동시에 조회한다.
+    #    공고 하나당 3콜을 (공고 수)만큼 순차로 돌리면 왕복 대기가 쌓여 느려지므로
+    #    공고 단위로 병렬화하되, odcloud 과호출(스로틀)을 막으려 동시성을 제한한다.
+    semaphore = asyncio.Semaphore(5)
+
+    async def _stats(house_manage_no: str) -> dict:
+        async with semaphore:
+            return await competition_tools.get_competition_stats(house_manage_no)
+
+    stats_list = await asyncio.gather(*(_stats(n["HOUSE_MANAGE_NO"]) for n, _ in eligible))
+
+    # 3) 조회 결과로 실현가능성을 매겨 조립한다.
+    evaluated: list[dict[str, Any]] = []
+    for (notice, track), stats in zip(eligible, stats_list, strict=True):
         observed_cutoff = _observed_private_cutoff(stats["winning_scores"])
         if track == "private":
             if observed_cutoff is not None:
