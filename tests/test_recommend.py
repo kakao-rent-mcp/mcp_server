@@ -1,8 +1,9 @@
-"""recommend_housing v2 테스트.
+"""recommend_housing 테스트.
 
-세션 프로필 → 룰 엔진 분석 → 실시간 공고·경쟁률 결합 → 실현가능성 순 추천.
-공고의 국민/민영 구분(HOUSE_DTL_SECD_NM)별로 자격 없는 트랙은 걸러져야 한다
-(스펙 §8에서 지적한 '공고별 유형을 판정에 반영하지 않는 갭'의 해소).
+세션 프로필 → 룰 엔진 분석 → 진행/예정 공고 스캔 → 같은 시군구·트랙의 마감 공고
+실제 경쟁률(1순위 해당지역) 결합 → 당첨 쉬운(경쟁률 낮은) 순 추천.
+- 마감된 공고는 추천에서 제외되고 비교군으로만 쓰인다.
+- 확률 라벨 대신 유사 과거 경쟁률을 제시하며, 비교 표본이 없으면 그 사실을 명시한다.
 """
 
 from __future__ import annotations
@@ -19,6 +20,13 @@ from slug_mcp.store import ProfileStore
 from slug_mcp.tools import recommend
 
 FIXTURES = Path(__file__).parent / "fixtures"
+
+_SEARCH_URL = "https://api.odcloud.kr/api/ApplyhomeInfoDetailSvc/v1/getAPTLttotPblancDetail"
+_CMPET_URL = "https://api.odcloud.kr/api/ApplyhomeInfoCmpetRtSvc/v1/getAPTLttotPblancCmpet"
+
+# 고정된 '오늘'(2026-07-08) 기준
+_FUTURE = ("2026-07-20", "2026-07-29")  # 접수전
+_PAST = ("2026-05-01", "2026-05-10")  # 마감
 
 
 def _load_fixture(name: str) -> dict:
@@ -68,19 +76,54 @@ def _complete_patch(**overrides: object) -> dict:
     return doc
 
 
-def _mock_odcloud_routes():
-    respx.get("https://api.odcloud.kr/api/ApplyhomeInfoDetailSvc/v1/getAPTLttotPblancDetail").mock(
-        return_value=httpx.Response(200, json=_load_fixture("apt_lttot_pblanc_detail.json"))
-    )
-    respx.get("https://api.odcloud.kr/api/ApplyhomeInfoCmpetRtSvc/v1/getAPTLttotPblancCmpet").mock(
-        return_value=httpx.Response(200, json=_load_fixture("apt_lttot_pblanc_cmpet.json"))
-    )
-    respx.get("https://api.odcloud.kr/api/ApplyhomeInfoCmpetRtSvc/v1/getAptLttotPblancScore").mock(
-        return_value=httpx.Response(200, json=_load_fixture("apt_lttot_pblanc_score_empty.json"))
-    )
-    respx.get("https://api.odcloud.kr/api/ApplyhomeInfoCmpetRtSvc/v1/getAPTSpsplyReqstStus").mock(
-        return_value=httpx.Response(200, json=_load_fixture("apt_spsply_reqst_stus.json"))
-    )
+def _notice(
+    house_manage_no: str,
+    *,
+    begin: str,
+    end: str,
+    sigungu: str = "고양시",
+    track: str = "국민",
+    supply: int = 1000,
+    name: str = "테스트 공고",
+) -> dict:
+    return {
+        "HOUSE_MANAGE_NO": house_manage_no,
+        "PBLANC_NO": house_manage_no,
+        "HOUSE_NM": name,
+        "HSSPLY_ADRES": f"경기도 {sigungu} 어느동 123-4",
+        "HOUSE_DTL_SECD_NM": track,
+        "SUBSCRPT_AREA_CODE_NM": "경기",
+        "RCEPT_BGNDE": begin,
+        "RCEPT_ENDDE": end,
+        "TOT_SUPLY_HSHLDCO": supply,
+    }
+
+
+def _search_response(*notices: dict) -> dict:
+    return {
+        "page": 1,
+        "perPage": 100,
+        "totalCount": len(notices),
+        "currentCount": len(notices),
+        "data": list(notices),
+    }
+
+
+def _cmpet_response(*rates: str) -> dict:
+    """1순위·해당지역 경쟁률 행들로 구성된 경쟁률 응답을 만든다."""
+    return {
+        "data": [
+            {
+                "HOUSE_TY": "084.0000A",
+                "SUBSCRPT_RANK_CODE": 1,
+                "RESIDE_SENM": "해당지역",
+                "SUPLY_HSHLDCO": 100,
+                "REQ_CNT": "0",
+                "CMPET_RATE": rate,
+            }
+            for rate in rates
+        ]
+    }
 
 
 async def test_recommend_requires_session():
@@ -96,30 +139,139 @@ async def test_recommend_incomplete_profile_returns_questions():
 
 
 @respx.mock
-async def test_recommend_ranks_public_notice_for_eligible_user():
-    _mock_odcloud_routes()
+async def test_recommend_attaches_comparable_competition():
+    """같은 시군구·트랙의 마감 공고 경쟁률(1순위 해당지역)이 추천에 붙는다."""
+    respx.get(_SEARCH_URL).mock(
+        return_value=httpx.Response(
+            200,
+            json=_search_response(
+                _notice("OPEN1", begin=_FUTURE[0], end=_FUTURE[1], supply=1200, name="고양 신규"),
+                _notice("PAST1", begin=_PAST[0], end=_PAST[1], name="고양 과거"),
+            ),
+        )
+    )
+    respx.get(_CMPET_URL).mock(return_value=httpx.Response(200, json=_cmpet_response("3.79")))
     session_id, _ = store_module.default_store.upsert(None, _complete_patch())
 
     result = await recommend.recommend_housing(session_id, max_candidates_to_scan=5, top_n=3)
 
     assert result["status"] == "ok"
-    assert result["total_candidates_scanned"] == 1
+    assert result["total_candidates_scanned"] == 1  # 진행/예정 공고는 OPEN1 하나
+    assert result["comparable_pool_notices"] == 1  # 마감 PAST1은 비교군으로만
     assert len(result["recommendations"]) == 1
     top = result["recommendations"][0]
-    assert top["notice"]["HOUSE_MANAGE_NO"] == "2026000320"
-    assert top["track"] == "public"  # 고양창릉 공고는 '국민'
-    assert top["application_status"] == "접수전"  # 접수시작 2026-07-20 (오늘 2026-07-08)
-    assert "Probability" in top["feasibility"]
-    assert top["past_competition"], "과거 경쟁률이 붙어 있어야 한다"
-    # 프로필 요약과 검증 주의도 함께 돌려줘 클라이언트 AI가 설명에 쓸 수 있게 한다
+    assert top["notice"]["HOUSE_MANAGE_NO"] == "OPEN1"
+    assert top["track"] == "public"
+    assert top["application_status"] == "접수전"
+    assert top["supply_households"] == 1200
+    comp = top["comparable_competition"]
+    assert comp is not None
+    assert comp["avg_competition_rate"] == 3.79
+    assert comp["sample_notice_count"] == 1
+    assert comp["undersubscribed_row_count"] == 0
+    # 확률 라벨은 더 이상 제공하지 않는다
+    assert "feasibility" not in top
     assert result["analysis_summary"]["private_general_score"] == 45
-    assert result["verification_notes"]
+
+
+@respx.mock
+async def test_recommend_undersubscribed_counts_as_zero():
+    """미달((△)) 공고는 평균에서 0으로 반영되고 미달 건수로 집계된다."""
+    respx.get(_SEARCH_URL).mock(
+        return_value=httpx.Response(
+            200,
+            json=_search_response(
+                _notice("OPEN1", begin=_FUTURE[0], end=_FUTURE[1]),
+                _notice("PAST1", begin=_PAST[0], end=_PAST[1]),
+            ),
+        )
+    )
+    # 한 공고에 6.0 한 행 + 미달 한 행 → 평균 3.0, 미달 1건
+    respx.get(_CMPET_URL).mock(
+        return_value=httpx.Response(200, json=_cmpet_response("6.00", "(△5)"))
+    )
+    session_id, _ = store_module.default_store.upsert(None, _complete_patch())
+
+    result = await recommend.recommend_housing(session_id, max_candidates_to_scan=5)
+
+    comp = result["recommendations"][0]["comparable_competition"]
+    assert comp["avg_competition_rate"] == 3.0
+    assert comp["undersubscribed_row_count"] == 1
+
+
+@respx.mock
+async def test_recommend_reports_no_comparable_data():
+    """같은 시군구에 마감 공고가 없으면 comparable_competition은 None."""
+    respx.get(_SEARCH_URL).mock(
+        return_value=httpx.Response(
+            200,
+            json=_search_response(
+                _notice("OPEN1", sigungu="성남시", begin=_FUTURE[0], end=_FUTURE[1]),
+            ),
+        )
+    )
+    session_id, _ = store_module.default_store.upsert(None, _complete_patch())
+
+    result = await recommend.recommend_housing(session_id, max_candidates_to_scan=5)
+
+    assert len(result["recommendations"]) == 1
+    assert result["recommendations"][0]["comparable_competition"] is None
+
+
+@respx.mock
+async def test_recommend_ranks_easier_competition_first():
+    """경쟁률 낮은(당첨 쉬운) 공고가 먼저 오도록 정렬된다."""
+    respx.get(_SEARCH_URL).mock(
+        return_value=httpx.Response(
+            200,
+            json=_search_response(
+                _notice("HARD", sigungu="고양시", begin=_FUTURE[0], end=_FUTURE[1], name="치열"),
+                _notice("EASY", sigungu="용인시", begin=_FUTURE[0], end=_FUTURE[1], name="여유"),
+                _notice("PAST_G", sigungu="고양시", begin=_PAST[0], end=_PAST[1]),
+                _notice("PAST_Y", sigungu="용인시", begin=_PAST[0], end=_PAST[1]),
+            ),
+        )
+    )
+
+    def _by_notice(request: httpx.Request) -> httpx.Response:
+        rate = "10.0" if "PAST_G" in str(request.url) else "1.0"
+        return httpx.Response(200, json=_cmpet_response(rate))
+
+    respx.get(_CMPET_URL).mock(side_effect=_by_notice)
+    session_id, _ = store_module.default_store.upsert(None, _complete_patch())
+
+    result = await recommend.recommend_housing(session_id, max_candidates_to_scan=5, top_n=3)
+
+    order = [rec["notice"]["HOUSE_MANAGE_NO"] for rec in result["recommendations"]]
+    assert order == ["EASY", "HARD"]  # 용인시(경쟁률 1) < 고양시(경쟁률 10)
+
+
+@respx.mock
+async def test_recommend_excludes_closed_notice():
+    """마감 공고는 추천되지 않고 비교군 풀에만 들어간다."""
+    respx.get(_SEARCH_URL).mock(
+        return_value=httpx.Response(
+            200, json=_search_response(_notice("PAST1", begin=_PAST[0], end=_PAST[1]))
+        )
+    )
+    session_id, _ = store_module.default_store.upsert(None, _complete_patch())
+
+    result = await recommend.recommend_housing(session_id, max_candidates_to_scan=5)
+
+    assert result["status"] == "ok"
+    assert result["recommendations"] == []
+    assert result["total_candidates_scanned"] == 0
+    assert result["comparable_pool_notices"] == 1
 
 
 @respx.mock
 async def test_recommend_skips_public_notice_for_homeowner():
-    """유주택자(공공 전체 부적격)는 '국민' 공고가 추천에서 걸러져야 한다."""
-    _mock_odcloud_routes()
+    """유주택자(공공 전체 부적격)는 '국민' 공고가 추천에서 걸러진다."""
+    respx.get(_SEARCH_URL).mock(
+        return_value=httpx.Response(
+            200, json=_search_response(_notice("OPEN1", begin=_FUTURE[0], end=_FUTURE[1]))
+        )
+    )
     session_id, _ = store_module.default_store.upsert(
         None,
         _complete_patch(
@@ -136,24 +288,3 @@ async def test_recommend_skips_public_notice_for_homeowner():
     assert result["status"] == "ok"
     assert result["recommendations"] == []
     assert result["skipped_ineligible_count"] == 1
-
-
-@respx.mock
-async def test_recommend_excludes_closed_notice():
-    """접수가 끝난 공고는 신청 불가이므로 추천에서 빠지고 skipped_closed_count로 집계된다."""
-    detail = _load_fixture("apt_lttot_pblanc_detail.json")
-    detail["data"][0] = {
-        **detail["data"][0],
-        "RCEPT_BGNDE": "2026-05-01",
-        "RCEPT_ENDDE": "2026-05-10",  # 오늘(2026-07-08) 이전이라 마감
-    }
-    respx.get("https://api.odcloud.kr/api/ApplyhomeInfoDetailSvc/v1/getAPTLttotPblancDetail").mock(
-        return_value=httpx.Response(200, json=detail)
-    )
-    session_id, _ = store_module.default_store.upsert(None, _complete_patch())
-
-    result = await recommend.recommend_housing(session_id, max_candidates_to_scan=5)
-
-    assert result["status"] == "ok"
-    assert result["recommendations"] == []
-    assert result["skipped_closed_count"] == 1

@@ -26,3 +26,16 @@ async def get_competition_stats(house_manage_no: str) -> dict:
         "winning_scores": winning_scores.get("data", []),
         "special_supply": special_supply.get("data", []),
     }
+
+
+async def get_competition_rates(house_manage_no: str) -> list[dict]:
+    """공고의 순위별 경쟁률 행만 조회한다 (당첨가점·특공은 제외).
+
+    유사 과거 공고의 경쟁률만 필요할 때 3콜 대신 1콜로 가볍게 가져오기 위한 헬퍼.
+
+    Args:
+        house_manage_no: 공고의 주택관리번호
+    """
+    cond: dict[str, str | int] = {"cond[HOUSE_MANAGE_NO::EQ]": house_manage_no, "perPage": 50}
+    result = await odcloud.get("ApplyhomeInfoCmpetRtSvc", "getAPTLttotPblancCmpet", **cond)
+    return result.get("data", [])

@@ -1,8 +1,8 @@
 """세션 프로필 + 룰 엔진 + 실시간 공고·경쟁률 데이터를 결합한 맞춤 추천 도구.
 
-스펙 §8에서 지적한 갭(공고별 국민/민영 유형을 판정에 반영하지 않던 문제)을 해소:
-공고 행의 HOUSE_DTL_SECD_NM으로 트랙을 나눠 자격 없는 트랙은 걸러내고,
-과거 당첨가점이 조회되는 공고는 예상 컷오프를 실측값으로 보정한다(§6 권장).
+공고 행의 HOUSE_DTL_SECD_NM으로 트랙(국민/민영)을 나눠 자격 없는 트랙과 접수 마감
+공고를 걸러내고, 각 공고와 같은 시군구·트랙의 마감 공고 실제 경쟁률을 붙여
+'당첨 쉬운 순'으로 추천한다. 확률 추정 대신 실측 경쟁률만 제시한다.
 """
 
 from __future__ import annotations
@@ -82,28 +82,93 @@ def _notice_track(notice: dict[str, Any]) -> str:
     return "unknown"
 
 
-def _avg_competition_rate(past_competition: list[dict]) -> float:
-    rates: list[float] = []
-    for row in past_competition:
+def _sigungu_of(address: str) -> str | None:
+    """공고 주소에서 비교 단위 시군구를 뽑는다.
+
+    도는 시/군(예: 고양시), 특별·광역시는 자치구(예: 강남구) 단위로 본다.
+    검색 API는 시도까지만 필터하므로, 시군구 매칭은 주소로만 가능하다.
+    """
+    tokens = str(address).split()
+    if not tokens:
+        return None
+    sido = tokens[0]
+    if sido.endswith(("특별시", "광역시")):
+        for token in tokens[1:]:
+            if token.endswith(("구", "군")):
+                return token
+        return None
+    if sido.endswith("특별자치시"):  # 세종 등 (하위 구 없음)
+        return sido
+    for token in tokens[1:]:
+        if token.endswith(("시", "군")):
+            return token
+    return None
+
+
+def _competition_rate_value(row: dict) -> float | None:
+    """경쟁률 행에서 수치를 뽑는다. 미달((△..))은 0.0, 무효(-·빈값)는 None.
+
+    미달은 사용자에겐 '쉬운' 공고이므로 평균에서 빼지 않고 0으로 반영한다
+    (숫자만 골라 평균내면 경쟁 심한 공고만 남아 상향편향이 생긴다).
+    """
+    raw = str(row.get("CMPET_RATE", "")).strip()
+    if not raw or raw == "-":
+        return None
+    if raw.startswith("(") or "△" in raw:  # 미달 표기
+        return 0.0
+    try:
+        return float(raw)
+    except ValueError:
+        return None
+
+
+def _aggregate_comparable_rates(rows_by_notice: list[list[dict]]) -> dict[str, Any] | None:
+    """비교군 공고들의 1순위·해당지역 경쟁률을 집계한다. 표본이 없으면 None.
+
+    rows_by_notice: 비교군 공고 각각의 경쟁률 행 목록.
+    """
+    values: list[float] = []
+    undersubscribed = 0
+    contributing_notices = 0
+    for rows in rows_by_notice:
+        note_values: list[float] = []
+        for row in rows:
+            if str(row.get("SUBSCRPT_RANK_CODE")) != "1":
+                continue
+            if "해당지역" not in str(row.get("RESIDE_SENM", "")):
+                continue
+            value = _competition_rate_value(row)
+            if value is None:
+                continue
+            note_values.append(value)
+            if value == 0.0:
+                undersubscribed += 1
+        if note_values:
+            contributing_notices += 1
+            values.extend(note_values)
+    if not values:
+        return None
+    return {
+        "avg_competition_rate": round(sum(values) / len(values), 2),
+        "sample_notice_count": contributing_notices,
+        "undersubscribed_row_count": undersubscribed,
+    }
+
+
+def _int_or_none(value: object) -> int | None:
+    if isinstance(value, (int, str)):
         try:
-            rates.append(float(row.get("CMPET_RATE", 0)))
-        except (TypeError, ValueError):
-            continue  # 미달 등 숫자가 아닌 표기는 평균 계산에서 제외
-    return sum(rates) / len(rates) if rates else 0.0
+            return int(value)
+        except ValueError:
+            return None
+    return None
 
 
-def _observed_private_cutoff(winning_scores: list[dict]) -> float | None:
-    """과거 당첨가점 행에서 최저 당첨가점(진입 컷)을 추정한다. 없으면 None."""
-    observed: list[float] = []
-    for row in winning_scores:
-        for key, value in row.items():
-            if "SCORE" not in key.upper():
-                continue
-            try:
-                observed.append(float(value))
-            except (TypeError, ValueError):
-                continue
-    return min(observed) if observed else None
+# 비교군 확보를 위해 시도 공고를 넉넉히 조회한다(최신순이라 과거 공고가 함께 딸려온다).
+_COMPARABLE_POOL_SIZE = 100
+# 시군구·트랙당 비교에 쓸 과거 공고 수 상한(과호출 방지). 최신순으로 이만큼만 본다.
+_MAX_COMPARABLE_PER_AREA = 8
+_TRACK_NAME = {"public": "국민", "private": "민영", "unknown": "구분미상"}
 
 
 async def recommend_housing(
@@ -118,8 +183,9 @@ async def recommend_housing(
     1. 세션 프로필을 룰 엔진으로 분석한다 (부족하면 물어볼 질문을 돌려준다).
     2. 목표지역 시·도로 공고 후보를 수집하고, 접수 마감된 공고(신청 불가)와
        국민/민영 구분상 자격 없는 트랙(예: 유주택자의 공공분양)을 걸러낸다.
-    3. 공고별 과거 경쟁률·당첨가점을 붙이고, 당첨가점 실측값이 있으면 예상
-       컷오프를 보정해 실현가능성(Probability)을 매긴 뒤 높은 순으로 추천한다.
+    3. 각 공고와 같은 시군구·트랙의 마감된 과거 공고들의 실제 경쟁률(1순위 해당지역)을
+       붙이고, 경쟁률이 낮은(당첨 쉬운) 순으로 추천한다. 진행/예정 공고는 아직 자기
+       결과가 없으므로, 확률을 지어내지 않고 '유사 과거 실적'만 제시한다.
 
     Args:
         session_id: update_my_profile이 발급한 세션 ID
@@ -149,87 +215,113 @@ async def recommend_housing(
     private_ok = eligibility["is_eligible_for_private"]
 
     region = matching["target_region_evaluated"]
+    today = _today_kst()
+
+    # 시도 공고를 넉넉히 조회한다 — 최신순이라 위쪽=진행/예정, 아래쪽=비교용 과거 공고.
     search_result = await notices_tools.search_housing_notices(
         house_category=house_category,
         region=_sido_of(region),
-        per_page=max_candidates_to_scan,
+        per_page=max(max_candidates_to_scan, _COMPARABLE_POOL_SIZE),
     )
-    candidates = search_result.get("data", [])
+    pool = [n for n in search_result.get("data", []) if n.get("HOUSE_MANAGE_NO")]
 
-    cutoffs = matching["expected_cutoffs"]
-    today = _today_kst()
+    # 1) 추천 후보 = 접수중·접수전(마감 제외) 중 자격 통과 공고. 마감 공고는 비교군으로만 쓴다.
+    open_notices = [n for n in pool if _application_status(n, today) != "마감"]
+    closed_notices = [n for n in pool if _application_status(n, today) == "마감"]
+    scanned = open_notices[:max_candidates_to_scan]
 
-    # 1) 마감 공고와 자격 없는 트랙을 먼저 걸러낸다 (여긴 API 호출 없음).
-    #    접수가 끝난 공고는 신청 자체가 불가능하므로 추천 대상에서 뺀다(접수중·접수전만 남김).
-    eligible: list[tuple[dict[str, Any], str]] = []
+    candidates: list[tuple[dict[str, Any], str]] = []
     skipped = 0
-    skipped_closed = 0
-    for notice in candidates:
-        if not notice.get("HOUSE_MANAGE_NO"):
-            continue
-        if _application_status(notice, today) == "마감":
-            skipped_closed += 1
-            continue
+    for notice in scanned:
         track = _notice_track(notice)
         if (track == "public" and not public_ok) or (track == "private" and not private_ok):
             skipped += 1
             continue
-        eligible.append((notice, track))
+        candidates.append((notice, track))
 
-    # 2) 자격 있는 공고들의 경쟁률·가점·특공을 동시에 조회한다.
-    #    공고 하나당 3콜을 (공고 수)만큼 순차로 돌리면 왕복 대기가 쌓여 느려지므로
-    #    공고 단위로 병렬화하되, odcloud 과호출(스로틀)을 막으려 동시성을 제한한다.
+    # 2) 마감 공고를 (시군구, 트랙)별로 묶어 비교군 인덱스를 만든다(최신순, 상한 적용).
+    comparable_full: dict[tuple[str, str], list[str]] = {}
+    for notice in closed_notices:
+        sigungu = _sigungu_of(notice.get("HSSPLY_ADRES", ""))
+        if not sigungu:
+            continue
+        comparable_full.setdefault((sigungu, _notice_track(notice)), []).append(
+            notice["HOUSE_MANAGE_NO"]
+        )
+    comparable_index = {k: v[:_MAX_COMPARABLE_PER_AREA] for k, v in comparable_full.items()}
+
+    # 3) 각 후보의 (시군구, 트랙) 키를 정하고, 필요한 비교군 공고의 경쟁률을 한 번에 병렬 조회한다.
+    candidate_keys: list[tuple[str, str] | None] = []
+    for notice, track in candidates:
+        sigungu = _sigungu_of(notice.get("HSSPLY_ADRES", ""))
+        candidate_keys.append((sigungu, track) if sigungu else None)
+
+    fetch_keys = [
+        k for k in dict.fromkeys(candidate_keys) if k is not None and k in comparable_index
+    ]
+    unique_hmns = list(dict.fromkeys(h for key in fetch_keys for h in comparable_index[key]))
+
     semaphore = asyncio.Semaphore(5)
 
-    async def _stats(house_manage_no: str) -> dict:
+    async def _rates(house_manage_no: str) -> list[dict]:
         async with semaphore:
-            return await competition_tools.get_competition_stats(house_manage_no)
+            return await competition_tools.get_competition_rates(house_manage_no)
 
-    stats_list = await asyncio.gather(*(_stats(n["HOUSE_MANAGE_NO"]) for n, _ in eligible))
+    rate_rows = await asyncio.gather(*(_rates(h) for h in unique_hmns))
+    rows_by_hmn = dict(zip(unique_hmns, rate_rows, strict=True))
+    aggregates = {
+        key: _aggregate_comparable_rates([rows_by_hmn[h] for h in comparable_index[key]])
+        for key in fetch_keys
+    }
 
-    # 3) 조회 결과로 실현가능성을 매겨 조립한다.
-    evaluated: list[dict[str, Any]] = []
-    for (notice, track), stats in zip(eligible, stats_list, strict=True):
-        observed_cutoff = _observed_private_cutoff(stats["winning_scores"])
-        if track == "private":
-            if observed_cutoff is not None:
-                pct = engine.private_feasibility_pct(
-                    scores["private_general_score"],
-                    int(observed_cutoff),
-                    int(observed_cutoff) + 5,
-                )
-            else:
-                pct = engine.private_feasibility_pct(
-                    scores["private_general_score"],
-                    cutoffs["private_score_min"],
-                    cutoffs["private_score_max"],
-                )
+    # 4) 추천 조립 — 확률 라벨 대신 유사 과거 경쟁률을 붙인다. 없으면 명시.
+    recommendations: list[dict[str, Any]] = []
+    for (notice, track), key in zip(candidates, candidate_keys, strict=True):
+        aggregate = aggregates.get(key) if key is not None else None
+        if key is not None and aggregate is not None:
+            comparable = {
+                "scope": f"{key[0]}·{_TRACK_NAME.get(track, track)}",
+                "basis": "1순위 해당지역",
+                **aggregate,
+            }
         else:
-            pct = engine.public_feasibility_pct(
-                scores["public_balance_recognized_krw"], cutoffs["public_balance_min_krw"]
-            )
-
-        evaluated.append(
+            comparable = None
+        recommendations.append(
             {
                 "notice": notice,
                 "track": track,
                 "application_status": _application_status(notice, today),
-                "feasibility": engine.feasibility_label(pct),
-                "feasibility_pct": pct,
-                "observed_private_cutoff": observed_cutoff,
-                "avg_competition_rate": round(_avg_competition_rate(stats["competition"]), 2),
-                "past_competition": stats["competition"],
-                "special_supply_status": stats["special_supply"],
+                "supply_households": _int_or_none(notice.get("TOT_SUPLY_HSHLDCO")),
+                "comparable_competition": comparable,
             }
         )
 
-    evaluated.sort(key=lambda item: (-item["feasibility_pct"], item["avg_competition_rate"]))
+    # 경쟁률 낮은(=당첨 쉬운) 순, 비교자료 없는 공고는 뒤로, 동률이면 공급세대 많은 순.
+    def _rank_key(rec: dict[str, Any]) -> tuple[float, int]:
+        comp = rec["comparable_competition"]
+        avg = comp["avg_competition_rate"] if comp else float("inf")
+        return (avg, -(rec["supply_households"] or 0))
+
+    recommendations.sort(key=_rank_key)
+
+    notes = list(analysis["verification_notes"])
+    capped = [k for k in fetch_keys if len(comparable_full[k]) > _MAX_COMPARABLE_PER_AREA]
+    if capped:
+        areas = ", ".join(f"{s}·{_TRACK_NAME.get(t, t)}" for s, t in capped)
+        notes.append(
+            f"유사 과거 경쟁률은 시군구·트랙당 최신 {_MAX_COMPARABLE_PER_AREA}개 공고까지만 "
+            f"반영했습니다(초과: {areas})."
+        )
+    notes.append(
+        "유사 과거 경쟁률은 같은 시군구·트랙의 마감된 공고 실적이며, 이 공고 자체의 "
+        "결과가 아닙니다. 실제 경쟁률은 공급물량·분양가·시황에 따라 달라집니다."
+    )
 
     return {
         "status": "ok",
-        "total_candidates_scanned": len(candidates),
-        "skipped_closed_count": skipped_closed,
+        "total_candidates_scanned": len(scanned),
         "skipped_ineligible_count": skipped,
+        "comparable_pool_notices": sum(len(v) for v in comparable_index.values()),
         "analysis_summary": {
             "private_general_score": scores["private_general_score"],
             "public_balance_recognized_krw": scores["public_balance_recognized_krw"],
@@ -237,9 +329,8 @@ async def recommend_housing(
                 key for key in ("newborn", "newlywed", "multi_child") if special[key] is not None
             ],
             "region_grade": matching["region_grade"],
-            "feasibility_level": matching["feasibility_level"],
             "recommended_tracks": matching["recommended_tracks"],
         },
-        "recommendations": evaluated[:top_n],
-        "verification_notes": analysis["verification_notes"],
+        "recommendations": recommendations[:top_n],
+        "verification_notes": notes,
     }
