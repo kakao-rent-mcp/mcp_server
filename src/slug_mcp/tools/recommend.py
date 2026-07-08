@@ -171,6 +171,39 @@ _MAX_COMPARABLE_PER_AREA = 8
 _TRACK_NAME = {"public": "국민", "private": "민영", "unknown": "구분미상"}
 
 
+def _build_comparable(
+    key: tuple[str, str] | None,
+    track: str,
+    has_comparable_notices: bool,
+    aggregate: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """추천 공고에 붙일 유사 과거 경쟁률 블록을 만든다.
+
+    데이터가 있으면 요약 문구까지, 없으면 '왜 없는지' 사유를 담는다(빈칸 대신 설명).
+    """
+    if key is None:
+        return {
+            "avg_competition_rate": None,
+            "reason": "공고 주소에서 시군구를 확인하지 못해 비교 실적을 찾지 못했습니다.",
+        }
+    scope = f"{key[0]}·{_TRACK_NAME.get(track, track)}"
+    if aggregate is not None:
+        avg = aggregate["avg_competition_rate"]
+        under = aggregate["undersubscribed_row_count"]
+        detail = f"1순위 해당지역 평균 {avg}:1 (표본 {aggregate['sample_notice_count']}개 공고"
+        detail += f", 미달 {under}건)" if under else ")"
+        summary = f"미달(신청 부족)이 잦았습니다 — {detail}" if avg < 1 else detail
+        return {"scope": scope, "basis": "1순위 해당지역", "summary": summary, **aggregate}
+    if not has_comparable_notices:
+        reason = (
+            f"같은 시군구·트랙({scope})의 마감된 공고 이력이 없어 비교할 실적이 없습니다. "
+            "신도시 첫 공급이거나 해당 유형 공급이 드문 지역일 수 있습니다."
+        )
+    else:
+        reason = f"{scope}의 과거 공고는 있으나 1순위 해당지역 경쟁률 자료가 없습니다."
+    return {"scope": scope, "avg_competition_rate": None, "reason": reason}
+
+
 async def recommend_housing(
     session_id: str,
     house_category: HouseCategory = HouseCategory.APT,
@@ -278,29 +311,21 @@ async def recommend_housing(
     recommendations: list[dict[str, Any]] = []
     for (notice, track), key in zip(candidates, candidate_keys, strict=True):
         aggregate = aggregates.get(key) if key is not None else None
-        if key is not None and aggregate is not None:
-            comparable = {
-                "scope": f"{key[0]}·{_TRACK_NAME.get(track, track)}",
-                "basis": "1순위 해당지역",
-                **aggregate,
-            }
-        else:
-            comparable = None
+        has_comparable = key is not None and key in comparable_index
         recommendations.append(
             {
                 "notice": notice,
                 "track": track,
                 "application_status": _application_status(notice, today),
                 "supply_households": _int_or_none(notice.get("TOT_SUPLY_HSHLDCO")),
-                "comparable_competition": comparable,
+                "comparable_competition": _build_comparable(key, track, has_comparable, aggregate),
             }
         )
 
     # 경쟁률 낮은(=당첨 쉬운) 순, 비교자료 없는 공고는 뒤로, 동률이면 공급세대 많은 순.
     def _rank_key(rec: dict[str, Any]) -> tuple[float, int]:
-        comp = rec["comparable_competition"]
-        avg = comp["avg_competition_rate"] if comp else float("inf")
-        return (avg, -(rec["supply_households"] or 0))
+        avg = rec["comparable_competition"].get("avg_competition_rate")
+        return (avg if avg is not None else float("inf"), -(rec["supply_households"] or 0))
 
     recommendations.sort(key=_rank_key)
 

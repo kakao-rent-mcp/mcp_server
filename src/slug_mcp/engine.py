@@ -74,8 +74,10 @@ def _deposit_area_bracket(area_sqm: float) -> str:
 
 
 def feasibility_label(probability_pct: int) -> str:
+    # 프로필 점수와 지역 등급으로만 매긴 '추정' 등급이다. 특정 확률(%)이 아니라
+    # 개별 공고 경쟁률과도 무관하므로 확률로 표기하지 않는다.
     label = {80: "매우높음", 60: "높음", 40: "보통", 20: "낮음", 5: "매우낮음"}[probability_pct]
-    return f"{label} (Probability: {probability_pct}%)"
+    return f"{label}(추정)"
 
 
 def private_feasibility_pct(score: int, cutoff_min: int, cutoff_max: int) -> int:

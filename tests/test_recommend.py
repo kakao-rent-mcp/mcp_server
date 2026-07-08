@@ -169,6 +169,7 @@ async def test_recommend_attaches_comparable_competition():
     assert comp["avg_competition_rate"] == 3.79
     assert comp["sample_notice_count"] == 1
     assert comp["undersubscribed_row_count"] == 0
+    assert "3.79:1" in comp["summary"]
     # 확률 라벨은 더 이상 제공하지 않는다
     assert "feasibility" not in top
     assert result["analysis_summary"]["private_general_score"] == 45
@@ -197,11 +198,12 @@ async def test_recommend_undersubscribed_counts_as_zero():
     comp = result["recommendations"][0]["comparable_competition"]
     assert comp["avg_competition_rate"] == 3.0
     assert comp["undersubscribed_row_count"] == 1
+    assert "미달 1건" in comp["summary"]
 
 
 @respx.mock
 async def test_recommend_reports_no_comparable_data():
-    """같은 시군구에 마감 공고가 없으면 comparable_competition은 None."""
+    """같은 시군구에 마감 공고가 없으면 경쟁률 대신 '왜 없는지' 사유를 담는다."""
     respx.get(_SEARCH_URL).mock(
         return_value=httpx.Response(
             200,
@@ -215,7 +217,10 @@ async def test_recommend_reports_no_comparable_data():
     result = await recommend.recommend_housing(session_id, max_candidates_to_scan=5)
 
     assert len(result["recommendations"]) == 1
-    assert result["recommendations"][0]["comparable_competition"] is None
+    comp = result["recommendations"][0]["comparable_competition"]
+    assert comp["avg_competition_rate"] is None
+    assert "성남시" in comp["reason"]
+    assert "이력이 없어" in comp["reason"]
 
 
 @respx.mock
