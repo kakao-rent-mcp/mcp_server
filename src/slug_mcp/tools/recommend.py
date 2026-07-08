@@ -222,10 +222,20 @@ async def recommend_housing(
 
     Args:
         session_id: update_my_profile이 발급한 세션 ID
-        house_category: apt(아파트) | officetel(오피스텔 등) | remainder(무순위/잔여)
+        house_category: 현재 apt(아파트)만 지원. 다른 값은 unsupported_category로 반환한다.
         max_candidates_to_scan: 검토할 공고 후보 수 상한
         top_n: 최종 추천 개수
     """
+    if house_category is not HouseCategory.APT:
+        # 자격판정·경쟁률 집계가 모두 아파트 청약(가점·순위제) 기준이라, 규칙이 다른
+        # 오피스텔·잔여세대 등은 말없이 틀린 결과를 주는 대신 명시적으로 막는다.
+        return {
+            "status": "unsupported_category",
+            "guidance": "recommend_housing은 아파트(apt) 청약 자격·경쟁률 분석 전용입니다. "
+            "오피스텔·잔여세대 등은 자격·경쟁률 기준이 달라 추천하지 않습니다. 해당 유형 "
+            "공고 목록은 search_housing_notices로 조회하세요.",
+        }
+
     doc = store_module.default_store.get(session_id)
     if doc is None:
         return {
@@ -300,8 +310,14 @@ async def recommend_housing(
         async with semaphore:
             return await competition_tools.get_competition_rates(house_manage_no)
 
-    rate_rows = await asyncio.gather(*(_rates(h) for h in unique_hmns))
-    rows_by_hmn = dict(zip(unique_hmns, rate_rows, strict=True))
+    # 비교군 경쟁률은 보조 데이터라, 일부 조회가 실패해도 나머지로 계속 진행한다
+    # (한 콜의 일시 오류가 추천 전체를 무너뜨리지 않게 한다).
+    rate_rows = await asyncio.gather(*(_rates(h) for h in unique_hmns), return_exceptions=True)
+    rows_by_hmn = {
+        h: (rows if not isinstance(rows, BaseException) else [])
+        for h, rows in zip(unique_hmns, rate_rows, strict=True)
+    }
+    failed_rate_fetches = sum(1 for rows in rate_rows if isinstance(rows, BaseException))
     aggregates = {
         key: _aggregate_comparable_rates([rows_by_hmn[h] for h in comparable_index[key]])
         for key in fetch_keys
@@ -330,6 +346,11 @@ async def recommend_housing(
     recommendations.sort(key=_rank_key)
 
     notes = list(analysis["verification_notes"])
+    if failed_rate_fetches:
+        notes.append(
+            f"비교군 경쟁률 조회 {failed_rate_fetches}건이 일시 오류로 누락되어, 일부 추천의 "
+            "과거 실적이 실제보다 적게 반영됐을 수 있습니다."
+        )
     capped = [k for k in fetch_keys if len(comparable_full[k]) > _MAX_COMPARABLE_PER_AREA]
     if capped:
         areas = ", ".join(f"{s}·{_TRACK_NAME.get(t, t)}" for s, t in capped)

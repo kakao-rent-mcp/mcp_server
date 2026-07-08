@@ -6,11 +6,16 @@
 
 from __future__ import annotations
 
+import asyncio
 import os
 
 import httpx
 
 BASE_URL = "https://api.odcloud.kr/api"
+
+# 일시적 5xx·네트워크 오류에 대한 재시도. GET(멱등)만 부르므로 재시도가 안전하다.
+# 4xx(잘못된 요청·키)는 재시도해도 소용없으니 즉시 실패시킨다.
+_RETRY_BACKOFF_SECONDS = (0.5, 1.5)
 
 
 class OdcloudConfigError(RuntimeError):
@@ -42,7 +47,20 @@ async def get(service: str, operation: str, **params: str | int | float | bool) 
         **params,
         "serviceKey": _decoding_key(),
     }
-    async with httpx.AsyncClient(timeout=15) as client:
-        response = await client.get(url, params=query)
-        response.raise_for_status()
-        return response.json()
+    last_exc: Exception | None = None
+    for attempt in range(len(_RETRY_BACKOFF_SECONDS) + 1):
+        try:
+            async with httpx.AsyncClient(timeout=15) as client:
+                response = await client.get(url, params=query)
+                response.raise_for_status()
+                return response.json()
+        except httpx.HTTPStatusError as exc:
+            if exc.response.status_code < 500:
+                raise  # 4xx는 재시도 무의미
+            last_exc = exc
+        except httpx.RequestError as exc:  # 연결·타임아웃 등 네트워크 오류
+            last_exc = exc
+        if attempt < len(_RETRY_BACKOFF_SECONDS):
+            await asyncio.sleep(_RETRY_BACKOFF_SECONDS[attempt])
+    assert last_exc is not None
+    raise last_exc

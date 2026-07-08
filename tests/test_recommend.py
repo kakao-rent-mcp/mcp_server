@@ -16,6 +16,8 @@ import pytest
 import respx
 
 from slug_mcp import store as store_module
+from slug_mcp.clients import odcloud
+from slug_mcp.models import HouseCategory
 from slug_mcp.store import ProfileStore
 from slug_mcp.tools import recommend
 
@@ -42,6 +44,12 @@ def _fresh_store(monkeypatch):
 def _frozen_today(monkeypatch):
     # 공고 접수일 기준 '오늘'을 고정해, 시간이 지나도 마감 판정이 흔들리지 않게 한다.
     monkeypatch.setattr(recommend, "_today_kst", lambda: "2026-07-08")
+
+
+@pytest.fixture(autouse=True)
+def _fast_retry(monkeypatch):
+    # 5xx 재시도 대기시간을 없애 테스트를 빠르게 유지한다.
+    monkeypatch.setattr(odcloud, "_RETRY_BACKOFF_SECONDS", (0.0, 0.0))
 
 
 def _complete_patch(**overrides: object) -> dict:
@@ -136,6 +144,37 @@ async def test_recommend_incomplete_profile_returns_questions():
     session_id, _ = store_module.default_store.upsert(None, {"user_profile": {"age": 34}})
     result = await recommend.recommend_housing(session_id)
     assert result["status"] == "needs_more_info"
+
+
+async def test_recommend_rejects_non_apt_category():
+    """아파트 외 카테고리는 자격·경쟁률 기준이 달라 명시적으로 막는다."""
+    session_id, _ = store_module.default_store.upsert(None, _complete_patch())
+    result = await recommend.recommend_housing(session_id, house_category=HouseCategory.OFFICETEL)
+    assert result["status"] == "unsupported_category"
+    assert "search_housing_notices" in result["guidance"]
+
+
+@respx.mock
+async def test_recommend_tolerates_failed_comparable_fetch():
+    """비교군 경쟁률 조회가 실패해도 추천 자체는 나오고, 누락을 알린다."""
+    respx.get(_SEARCH_URL).mock(
+        return_value=httpx.Response(
+            200,
+            json=_search_response(
+                _notice("OPEN1", begin=_FUTURE[0], end=_FUTURE[1]),
+                _notice("PAST1", begin=_PAST[0], end=_PAST[1]),
+            ),
+        )
+    )
+    respx.get(_CMPET_URL).mock(return_value=httpx.Response(503))  # 계속 실패
+    session_id, _ = store_module.default_store.upsert(None, _complete_patch())
+
+    result = await recommend.recommend_housing(session_id, max_candidates_to_scan=5)
+
+    assert result["status"] == "ok"
+    assert len(result["recommendations"]) == 1  # 비교 실패해도 추천은 유지
+    assert result["recommendations"][0]["comparable_competition"]["avg_competition_rate"] is None
+    assert any("누락" in note for note in result["verification_notes"])
 
 
 @respx.mock
