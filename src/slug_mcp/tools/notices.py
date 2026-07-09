@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+
 from ..clients import odcloud
 from ..models import HouseCategory
 
@@ -40,10 +42,12 @@ async def get_notice_detail(house_manage_no: str) -> dict:
         house_manage_no: 공고의 주택관리번호 (search_housing_notices 결과의 HOUSE_MANAGE_NO)
     """
     cond: dict[str, str | int] = {"cond[HOUSE_MANAGE_NO::EQ]": house_manage_no, "perPage": 1}
-    detail = await odcloud.get("ApplyhomeInfoDetailSvc", "getAPTLttotPblancDetail", **cond)
-
     cond_mdl: dict[str, str | int] = {"cond[HOUSE_MANAGE_NO::EQ]": house_manage_no, "perPage": 50}
-    unit_types = await odcloud.get("ApplyhomeInfoDetailSvc", "getAPTLttotPblancMdl", **cond_mdl)
+    # 상세와 평형별은 서로 독립적이므로 순차로 기다리지 않고 동시에 부른다.
+    detail, unit_types = await asyncio.gather(
+        odcloud.get("ApplyhomeInfoDetailSvc", "getAPTLttotPblancDetail", **cond),
+        odcloud.get("ApplyhomeInfoDetailSvc", "getAPTLttotPblancMdl", **cond_mdl),
+    )
     return {
         "notice": detail.get("data", []),
         "unit_types": unit_types.get("data", []),

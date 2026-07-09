@@ -11,6 +11,7 @@
 
 from __future__ import annotations
 
+import re
 from datetime import date
 from typing import Any
 
@@ -23,10 +24,20 @@ _CAPITAL_SIDO_TOKENS = ("서울", "경기", "인천")
 _NEWLYWED_MAX_MARRIAGE_YEARS = 7
 
 
+def _mentions_admin_unit(region: str, name: str) -> bool:
+    """region 안에 name이 행정구역(시/군/구) 단위로 등장하는지 판정한다.
+
+    규제 목록은 모두 시/구 단위이므로, name 뒤가 '시/군/구'이거나 공백·문자열 끝일 때만
+    매칭한다. 도로명(예: '김포시 과천봉담로'의 '과천')·리/동명 부분일치는 배제된다.
+    """
+    return re.search(rf"{re.escape(name)}(?:시|군|구|\s|$)", region) is not None
+
+
 def is_regulated_region(region: str | None) -> bool:
     """지역 문자열이 규제지역(조정대상지역·투기과열지구)에 속하는지 판정한다.
 
-    목록은 yaml의 regulated_regions(2025-10-15 대책 반영)만 보며, 하드코딩하지 않는다.
+    목록은 yaml의 regulated_regions만 보며 하드코딩하지 않는다. district 항목이 여러
+    토큰이면(예: '성남 분당') 모두 행정단위로 등장해야 매칭된다('성남시 분당구').
     """
     if not region:
         return False
@@ -34,10 +45,8 @@ def is_regulated_region(region: str | None) -> bool:
     for sido in rules["full_sido"]:
         if sido in region:
             return True
-    normalized = region.replace("시 ", " ").replace("구", "").replace("시", "")
     for district in rules["gyeonggi_districts"]:
-        district_normalized = district.replace("시", "").replace("구", "")
-        if district in region or district_normalized in normalized:
+        if all(_mentions_admin_unit(region, token) for token in district.split()):
             return True
     return False
 
@@ -75,7 +84,9 @@ def _deposit_area_bracket(area_sqm: float) -> str:
 
 def feasibility_label(probability_pct: int) -> str:
     label = {80: "매우높음", 60: "높음", 40: "보통", 20: "낮음", 5: "매우낮음"}[probability_pct]
-    return f"{label} (Probability: {probability_pct}%)"
+    # 프로필 점수와 지역 등급으로만 매긴 '추정' 등급이다. 특정 확률(%)이 아니라
+    # 개별 공고 경쟁률과도 무관하므로 확률로 표기하지 않는다.
+    return f"{label}(추정)"
 
 
 def private_feasibility_pct(score: int, cutoff_min: int, cutoff_max: int) -> int:
@@ -140,11 +151,16 @@ def _months_before_cap_change(duration_months: int, as_of: date) -> int:
     return max(0, duration_months - months_since)
 
 
-def analyze(doc: dict[str, Any], as_of: date | None = None) -> dict[str, Any]:
+def analyze(
+    doc: dict[str, Any], as_of: date | None = None, region_override: str | None = None
+) -> dict[str, Any]:
     """프로필 문서를 판정해 스펙 §7 출력 스키마를 돌려준다.
 
     필수 항목이 비어 있으면 status="needs_more_info"와 함께 클라이언트 AI가
     사용자에게 물어볼 질문 목록을 돌려준다.
+
+    region_override를 주면 목표지역 대신 그 지역으로 규제 여부·컷오프 등급을 판정한다
+    (추천 공고별 위치로 규제지역 자격을 다시 따질 때 사용).
     """
     as_of = as_of or date.today()
     required_missing, optional_missing = missing_fields(doc)
@@ -174,7 +190,7 @@ def analyze(doc: dict[str, Any], as_of: date | None = None) -> dict[str, Any]:
     duration_months = account.duration_months or 0
     balance_krw = account.total_balance_krw or 0
     residence_area = user.residence_area or ""
-    target_region = target.target_region or residence_area
+    target_region = region_override or target.target_region or residence_area
 
     is_married = bool(user.marriage.is_married)
     children = user.children_count or 0

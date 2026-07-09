@@ -14,6 +14,32 @@ from slug_mcp import engine
 AS_OF = date(2026, 7, 5)
 
 
+def test_is_regulated_region_matching():
+    """규제지역 매칭: 신규 지정(동탄·기흥·구리) 반영 + 구/시 구분 + 도로명 오탐 방지."""
+    regulated = [
+        "경기 과천",
+        "경기도 과천시 별양동",
+        "경기도 화성시 동탄구 오산동",  # 2026-06-29 신규
+        "경기도 용인시 기흥구",  # 2026-06-29 신규
+        "경기도 구리시 인창동",  # 2026-06-29 신규
+        "경기도 성남시 분당구",
+        "경기도 성남시 성남낙생지구 A-1블록",  # 구 생략 주소도 성남 전역이라 규제
+        "경기도 수원시 팔달구",
+        "서울특별시 노원구",
+    ]
+    not_regulated = [
+        "경기도 김포시 과천봉담로 1",  # 도로명 부분일치는 규제로 오판하면 안 됨
+        "경기도 화성시 효행구 비봉면",  # 화성 비(非)동탄구
+        "경기도 용인시 처인구",  # 기흥·수지만 규제
+        "경기도 수원시 권선구",  # 영통·장안·팔달만 규제
+        "경기도 고양시 덕양구",
+    ]
+    for region in regulated:
+        assert engine.is_regulated_region(region) is True, region
+    for region in not_regulated:
+        assert engine.is_regulated_region(region) is False, region
+
+
 def _complete_doc(**paths: object) -> dict:
     """스펙 §1 예시와 동일한 완전한 프로필. paths로 'a.b.c'=값 오버라이드."""
     doc: dict = {
