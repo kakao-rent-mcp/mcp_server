@@ -11,6 +11,7 @@
 
 from __future__ import annotations
 
+import re
 from datetime import date
 from typing import Any
 
@@ -23,10 +24,20 @@ _CAPITAL_SIDO_TOKENS = ("서울", "경기", "인천")
 _NEWLYWED_MAX_MARRIAGE_YEARS = 7
 
 
+def _mentions_admin_unit(region: str, name: str) -> bool:
+    """region 안에 name이 행정구역(시/군/구/읍/면/동) 단위로 등장하는지 판정한다.
+
+    규제 목록은 모두 시/구 단위이므로, name 뒤가 '시/군/구'이거나 공백·문자열 끝일 때만
+    매칭한다. 도로명(예: '김포시 과천봉담로'의 '과천')·리/동명 부분일치는 배제된다.
+    """
+    return re.search(rf"{re.escape(name)}(?:시|군|구|\s|$)", region) is not None
+
+
 def is_regulated_region(region: str | None) -> bool:
     """지역 문자열이 규제지역(조정대상지역·투기과열지구)에 속하는지 판정한다.
 
-    목록은 yaml의 regulated_regions(2025-10-15 대책 반영)만 보며, 하드코딩하지 않는다.
+    목록은 yaml의 regulated_regions만 보며 하드코딩하지 않는다. district 항목이 여러
+    토큰이면(예: '성남 분당') 모두 행정단위로 등장해야 매칭된다('성남시 분당구').
     """
     if not region:
         return False
@@ -34,10 +45,8 @@ def is_regulated_region(region: str | None) -> bool:
     for sido in rules["full_sido"]:
         if sido in region:
             return True
-    normalized = region.replace("시 ", " ").replace("구", "").replace("시", "")
     for district in rules["gyeonggi_districts"]:
-        district_normalized = district.replace("시", "").replace("구", "")
-        if district in region or district_normalized in normalized:
+        if all(_mentions_admin_unit(region, token) for token in district.split()):
             return True
     return False
 
