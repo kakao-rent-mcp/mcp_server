@@ -178,6 +178,34 @@ async def test_recommend_tolerates_failed_comparable_fetch():
 
 
 @respx.mock
+async def test_recommend_regates_regulated_notice_per_location():
+    """세대원이 비규제 목표를 잡아도, 규제지역(동탄) 공고는 세대주 요건으로 걸러진다."""
+    respx.get(_SEARCH_URL).mock(
+        return_value=httpx.Response(
+            200,
+            json=_search_response(
+                _notice("GOYANG", sigungu="고양시", begin=_FUTURE[0], end=_FUTURE[1]),
+                _notice("DONGTAN", sigungu="화성시 동탄구", begin=_FUTURE[0], end=_FUTURE[1]),
+            ),
+        )
+    )
+    # 세대원(세대주 아님): 비규제 고양은 1순위 가능, 규제 동탄은 세대주 요건으로 불가
+    session_id, _ = store_module.default_store.upsert(
+        None, _complete_patch(**{"user_profile.is_head_of_household": False})
+    )
+
+    result = await recommend.recommend_housing(session_id, max_candidates_to_scan=5)
+
+    ids = [rec["notice"]["HOUSE_MANAGE_NO"] for rec in result["recommendations"]]
+    assert "GOYANG" in ids  # 비규제 → 세대원도 1순위 가능
+    assert "DONGTAN" not in ids  # 규제 → 세대주 아니면 1순위 불가 → 제외
+    assert result["skipped_ineligible_count"] == 1
+    goyang = result["recommendations"][0]
+    assert goyang["notice"]["HOUSE_MANAGE_NO"] == "GOYANG"
+    assert goyang["regulated_region"] is False
+
+
+@respx.mock
 async def test_recommend_attaches_comparable_competition():
     """같은 시군구·트랙의 마감 공고 경쟁률(1순위 해당지역)이 추천에 붙는다."""
     respx.get(_SEARCH_URL).mock(

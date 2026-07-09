@@ -118,11 +118,16 @@ def _years_since(date_str: str, as_of: date) -> float:
     return (as_of - parsed).days / 365.25
 
 
-def analyze(doc: dict[str, Any], as_of: date | None = None) -> dict[str, Any]:
+def analyze(
+    doc: dict[str, Any], as_of: date | None = None, region_override: str | None = None
+) -> dict[str, Any]:
     """프로필 문서를 판정해 스펙 §7 출력 스키마를 돌려준다.
 
     필수 항목이 비어 있으면 status="needs_more_info"와 함께 클라이언트 AI가
     사용자에게 물어볼 질문 목록을 돌려준다.
+
+    region_override를 주면 목표지역 대신 그 지역으로 규제 여부·컷오프 등급을 판정한다
+    (추천 공고별 위치로 규제지역 자격을 다시 따질 때 사용).
     """
     as_of = as_of or date.today()
     required_missing, optional_missing = missing_fields(doc)
@@ -152,7 +157,7 @@ def analyze(doc: dict[str, Any], as_of: date | None = None) -> dict[str, Any]:
     duration_months = account.duration_months or 0
     balance_krw = account.total_balance_krw or 0
     residence_area = user.residence_area or ""
-    target_region = target.target_region or residence_area
+    target_region = region_override or target.target_region or residence_area
 
     is_married = bool(user.marriage.is_married)
     children = user.children_count or 0

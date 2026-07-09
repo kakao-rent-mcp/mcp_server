@@ -248,17 +248,29 @@ async def recommend_housing(
     if analysis["status"] != "ok":
         return analysis
 
-    eligibility = analysis["eligibility_status"]
     scores = analysis["scores"]
     matching = analysis["matching_analysis"]
     special = scores["special_supply_scores"]
-    public_ok = eligibility["is_eligible_for_public"] or any(
-        special[key] is not None for key in ("newborn", "newlywed", "multi_child")
-    )
-    private_ok = eligibility["is_eligible_for_private"]
 
     region = matching["target_region_evaluated"]
     today = _today_kst()
+
+    # 규제지역 여부는 공고 위치마다 다르므로(경기는 시군구 혼재), 자격을 '목표지역'이 아니라
+    # '각 공고 위치'로 재판정한다. 규제 여부만 자격을 바꾸고(세대주 요건·공공 1순위 24/24)
+    # 나머지 입력은 동일하니, 규제/비규제 두 경우만 계산해 캐시한다(순수 계산, 네트워크 없음).
+    elig_cache: dict[bool, tuple[bool, bool]] = {}
+
+    def _eligibility_for(region_str: str) -> tuple[bool, bool]:
+        regulated = engine.is_regulated_region(region_str)
+        if regulated not in elig_cache:
+            per = engine.analyze(doc, region_override=region_str)
+            elig = per["eligibility_status"]
+            sp = per["scores"]["special_supply_scores"]
+            public_ok = elig["is_eligible_for_public"] or any(
+                sp[key] is not None for key in ("newborn", "newlywed", "multi_child")
+            )
+            elig_cache[regulated] = (public_ok, elig["is_eligible_for_private"])
+        return elig_cache[regulated]
 
     # 시도 공고를 넉넉히 조회한다 — 최신순이라 위쪽=진행/예정, 아래쪽=비교용 과거 공고.
     search_result = await notices_tools.search_housing_notices(
@@ -268,7 +280,7 @@ async def recommend_housing(
     )
     pool = [n for n in search_result.get("data", []) if n.get("HOUSE_MANAGE_NO")]
 
-    # 1) 추천 후보 = 접수중·접수전(마감 제외) 중 자격 통과 공고. 마감 공고는 비교군으로만 쓴다.
+    # 1) 추천 후보 = 접수중·접수전(마감 제외) 중, 그 공고 위치 기준 자격을 통과한 공고.
     open_notices = [n for n in pool if _application_status(n, today) != "마감"]
     closed_notices = [n for n in pool if _application_status(n, today) == "마감"]
     scanned = open_notices[:max_candidates_to_scan]
@@ -276,6 +288,7 @@ async def recommend_housing(
     candidates: list[tuple[dict[str, Any], str]] = []
     skipped = 0
     for notice in scanned:
+        public_ok, private_ok = _eligibility_for(notice.get("HSSPLY_ADRES") or region)
         track = _notice_track(notice)
         if (track == "public" and not public_ok) or (track == "private" and not private_ok):
             skipped += 1
@@ -328,11 +341,13 @@ async def recommend_housing(
     for (notice, track), key in zip(candidates, candidate_keys, strict=True):
         aggregate = aggregates.get(key) if key is not None else None
         has_comparable = key is not None and key in comparable_index
+        regulated = engine.is_regulated_region(notice.get("HSSPLY_ADRES") or region)
         recommendations.append(
             {
                 "notice": notice,
                 "track": track,
                 "application_status": _application_status(notice, today),
+                "regulated_region": regulated,
                 "supply_households": _int_or_none(notice.get("TOT_SUPLY_HSHLDCO")),
                 "comparable_competition": _build_comparable(key, track, has_comparable, aggregate),
             }
