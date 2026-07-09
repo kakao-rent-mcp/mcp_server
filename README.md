@@ -39,9 +39,12 @@ uv run slug-mcp
 
 | 도구 | 하는 일 |
 |---|---|
-| `search_housing_notices` | 지역·유형으로 진행 중인 분양 공고 목록 검색 |
-| `get_notice_detail` | 공고 하나의 상세정보 + 주택형별 분양가·면적 |
-| `get_competition_stats` | 공고의 과거 경쟁률·당첨가점·특별공급 신청현황 |
+| `search_housing_notices` | 지역·유형으로 진행 중인 분양 공고 목록 검색 (청약홈) |
+| `get_notice_detail` | 공고 하나의 상세정보 + 주택형별 분양가·면적 (청약홈) |
+| `get_competition_stats` | 공고의 과거 경쟁률·당첨가점·특별공급 신청현황 (청약홈) |
+| `search_lease_notices` | LH 분양·임대 공고를 게시기간으로 검색 |
+| `get_lease_notice_detail` | LH 공고 하나의 상세 공급정보·첨부파일 조회 |
+| `extract_lease_notice_text` | LH 공고문 PDF를 내려받아 본문 텍스트 추출 |
 | `update_my_profile` | 대화에서 파악한 사용자 정보를 세션에 누적 저장 (부분 업데이트) |
 | `get_my_profile` | 저장된 프로필과 완성도(부족 항목·다음 질문) 조회 |
 | `analyze_my_subscription` | 룰 엔진 종합 판정: 자격 필터 → 가점·배점 → 컷오프 대조 → 트랙 추천 |
@@ -69,15 +72,21 @@ uv run slug-mcp
 자격판정·가점계산은 [docs/subscription-policy-spec.md](docs/subscription-policy-spec.md)
 명세를 구현한 것입니다 (구현: `engine.py`, `scoring.py`, 기준값: `config/eligibility_rules.yaml`).
 
-- **Hard Filter**: 무주택(유주택자는 공공 전체·민영 특공 차단, 민영 일반은 가점 0점),
-  공공 60㎡ 이하 자산 컷, 규제지역 세대주 요건(서울 전역+경기 12곳 동적 목록)
-- **민영 가점 84점**: 무주택기간 32 + 부양가족 35 + 통장 가입기간 17(배우자 합산)
-- **공공 특별공급 배점**: 신생아(우선70/일반20/추첨10 소득트랙), 신혼부부(LH 배점표:
-  우선 9점/일반 12점), 다자녀(100점 만점)
+- **Hard Filter**: 무주택(유주택 세대는 공공 전체·민영 특공 차단, 비규제 민영 일반은
+  가점 0점 / 규제지역은 유주택 가점제도 배제), 자산 컷(특공 전체 + 60㎡ 이하 일반),
+  규제지역 세대주·2주택·통장유형 요건(서울 전역+경기 15곳 동적 목록)
+- **소득 게이트**: 특공·공공 일반공급은 도시근로자 월평균소득 대비 상한(외벌이/맞벌이)을
+  넘으면 부적격 — 분양 소득표(1~3인 "3인 이하" 통합 행)로 판정
+- **민영 가점 84점**: 무주택기간 32(만 30세·혼인일 기산 상한 반영) + 부양가족 35 +
+  통장 가입기간 17(배우자 합산). 민영 1순위는 예치금 + 가입기간(규제 24/수도권 12/비수도권 6개월)
+- **공공 특별공급 배점**: 신생아(우선70/일반20/추첨10 소득트랙 + 경쟁 10점 배점),
+  신혼부부(일반형 별표6 순위제+13점), 다자녀(100점, 통장 10년↑ 5점 단일 구간)
 - **컷오프 대조**: 목표지역 S/A/B/C 등급별 예상 컷 + `recommend_housing`이 과거
   당첨가점 실측값으로 보정, 미달 시 우회 전략(추첨형 특공·대형 평형·대안 지역) 제시
-- 🟡(원문 재확인 필요) 규칙이 판정에 관여하면 `verification_notes`에 경고를 담아
-  돌려줍니다. 🔴(미검증) 규칙은 로직에 넣지 않았습니다.
+- 정책 수치는 2026-07-06 공식 출처로 재검증했습니다(근거는
+  [docs/data-integrity-audit.md](docs/data-integrity-audit.md)). 근사·미수집으로 한계가
+  있는 판정(무주택 기산 만나이 근사, 출산가구 자산 완화 미반영 등)은 `verification_notes`로
+  안내합니다.
 
 ## PlayMCP 심사 규격
 
@@ -87,7 +96,7 @@ uv run slug-mcp
 - **annotations 5종 필수** — 모든 도구에 `title / readOnlyHint / destructiveHint /
   openWorldHint / idempotentHint`를 명시합니다. 현재 도구는 전부 조회·계산이라
   `readOnly=true, destructive=false, idempotent=true`이고, 외부 공공데이터 API를 부르는
-  도구만 `openWorld=true`(`check_eligibility`는 순수 계산이라 `false`).
+  도구만 `openWorld=true`(`analyze_my_subscription`·프로필 조회/저장은 순수 계산이라 `false`).
 - **description에 서비스명 병기** — 모든 도구 설명 앞에 `[슬러그(Slug)]`(국문·영문 병기)를
   붙이고 1,024자 이내로 유지합니다.
 - **Stateless HTTP** — http 실행 시 `stateless_http=True`(세션 미사용)로 띄웁니다.
@@ -98,14 +107,14 @@ uv run slug-mcp
 
 ## 알려진 미완성 부분 (같이 다듬어야 할 것)
 
-- **⚠️ 2026-07-06 데이터 정합성 전수조사에서 오류가 다수 확인됐습니다.** 규제지역
-  목록(2026-07-01 추가분 경기 3곳 누락), 특공 소득 판정에 임대주택용 소득표 혼입,
-  민영 1순위 가입기간 미검사, 다자녀 가입기간 배점의 존재하지 않는 구간 등 —
-  전체 목록·근거·영향은 [docs/data-integrity-audit.md](docs/data-integrity-audit.md)
-  참고. 해당 감사는 기록만 하며 코드 수정은 후속 작업입니다.
-- **기준값 yaml은 사람이 갱신해야 합니다.** 소득표(`urban_worker_monthly_income_krw`)는
-  LH청약플러스 2025년도 적용분(2026-07-05 확인), 자산 상한은 2026-02-27 공고분,
-  규제지역 목록은 2025-10-15 대책 기준입니다. 매년/고시 개정 시
+- **✅ 2026-07-06 데이터 정합성 전수조사 오류를 수정했습니다.** 규제지역 목록(경기
+  15곳), 특공 소득 판정(분양 소득표로 교체), 민영·특공 1순위 가입기간·통장 요건, 특공
+  소득 게이트, 자산 컷 범위(특공 전체), 다자녀 통장 단일 구간, 무주택 만30세 기산, 월
+  25만원 소급, 세종 예치금 등을 정정했습니다. 항목별 수정 내역은
+  [docs/data-integrity-audit.md](docs/data-integrity-audit.md) 참고. 이를 위해 입력 필드
+  `owned_house_count`(세대 주택 보유 수)·`account_type`(통장 유형)이 추가됐습니다.
+- **기준값 yaml은 사람이 갱신해야 합니다.** 소득표·소득 상한·배점표·규제지역·자산 상한은
+  2026-07-06 공식 출처로 확정한 값입니다. 매년/고시 개정 시
   `config/eligibility_rules.yaml`과 [정책 명세](docs/subscription-policy-spec.md)의
   검증 태그를 함께 갱신하세요.
 - **🔴 미검증이던 규칙 2건은 2026-07-06 웹 검증으로 공식 확인됐습니다.** 미성년자
@@ -114,9 +123,10 @@ uv run slug-mcp
   [감사 문서](docs/data-integrity-audit.md)의 후속 조치 참고.
 - **프로필 저장은 프로세스 메모리입니다.** 서버 재시작·스케일아웃 시 세션이 사라집니다.
   단일 컨테이너 배포 전제이며, 다중 인스턴스가 필요해지면 외부 스토어 검토가 필요합니다.
-- **임대 도메인은 미구현입니다.** LH `lhLeaseNoticeBfhDtllInfo1`(분양임대공고별
-  상세정보, 사전청약) 오퍼레이션은 아직 서버에서 HTTP 500을 반환하는 상태라
-  `clients/lh.py`에만 있고 도구로는 연결하지 않았습니다.
+- **임대 자격판정은 미구현입니다.** LH 분양·임대 공고 조회 도구(`search_lease_notices`
+  등 3종)는 있으나, 임대주택 소득·자산 기준 판정 로직은 없습니다. 사전청약
+  `lhLeaseNoticeBfhDtllInfo1`(분양임대공고별 상세정보) 오퍼레이션은 아직 서버에서 HTTP
+  500을 반환하는 상태라 `clients/lh.py`에만 있고 도구로는 연결하지 않았습니다.
 
 ## 테스트
 

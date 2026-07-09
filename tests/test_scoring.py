@@ -2,10 +2,9 @@
 
 수치 근거는 docs/subscription-policy-spec.md 의 검증 태그를 따른다:
 - 민영 84점 가점 산식(§3.B ①②③): 🟢 청약홈 가점계산기 확인값
-- 다자녀 100점 배점(§2.B.③): 🟢
-- 신혼부부 배점: LH청약플러스 청약자격확인 2026-07-05 직접 확인
-  (우선공급 경쟁 9점 / 일반공급 경쟁 12점 — 기획서 13점표 아님)
-- 신생아 물량·소득 트랙(§2.B.①): 물량 🟢 / 소득수치 🟡
+- 다자녀 100점 배점(§2.B.③): 🟢 (통장 가입기간은 10년 이상 5점 단일 — B-4)
+- 신혼부부 배점: 공공 일반형 별표 6 순위제 + 경쟁 13점 (2026-07-06 재검증)
+- 신생아 물량·소득 트랙(§2.B.①) + 경쟁 배점 10점(A-8): 2026-07-06 재검증
 """
 
 from __future__ import annotations
@@ -92,12 +91,12 @@ def test_multi_child_score_example():
         has_household_composition_bonus=True,  # +5 (한부모 또는 3세대)
         homeless_years=6,  # 15
         residence_years=11,  # 15
-        account_years=6,  # 3
+        account_years=6,  # 0 (10년 미만 — B-4: 5~10년 3점 구간 없음)
         table=table,
     )
-    assert result["total"] == 68
+    assert result["total"] == 65
     assert result["children"] == 25
-    assert result["account_period"] == 3  # 가입기간 상한은 5점(10점 아님)
+    assert result["account_period"] == 0  # B-4: 10년 이상만 5점, 그 외 0점
 
 
 def test_multi_child_score_maximum():
@@ -114,39 +113,64 @@ def test_multi_child_score_maximum():
     assert result["total"] == 100
 
 
-# --- 신혼부부 특공 (LH 배점표: 우선 9점 / 일반 12점) -----------------------
+# --- 신혼부부 특공 (공공 일반형: 별표 6 순위제 + 경쟁 13점) -----------------
 
 
-def test_newlywed_score_priority_and_general():
+def test_newlywed_score_general_form_13point():
     table = load_rules()["newlywed_score_table"]
     result = scoring.newlywed_score(
-        income_ratio_pct=65.0,  # 70% 이하 → 3
-        residence_years=2,  # 2년 이상 → 3
+        income_ratio_pct=75.0,  # 외벌이 80% 이하 → 1
+        is_dual_income=False,
+        residence_years=3,  # 3년 이상 → 3
         payment_count=24,  # 24회 이상 → 3
         children_count=2,  # 2명 → 2
-        homeless_years=3,  # 3년 이상 → 3
+        marriage_years=2.0,  # 혼인 3년 이하 → 3
+        is_single_parent=False,
+        has_child_under_2=True,
+        infants_count=1,
         table=table,
     )
-    # 우선공급 경쟁: 소득3 + 거주3 + 납입3 = 9점 만점
-    assert result["priority_total"] == 9
-    assert result["priority_max"] == 9
-    # 일반공급 경쟁: 거주3 + 납입3 + 자녀2 + 무주택3 = 11점 / 12점 만점
-    assert result["general_total"] == 11
-    assert result["general_max"] == 12
+    assert result["income"] == 1
+    assert result["children"] == 2
+    assert result["residence_period"] == 3
+    assert result["payment_count"] == 3
+    assert result["marriage_period"] == 3
+    assert result["total"] == 12
+    assert result["max"] == 13
+    assert result["rank"] == 1  # 기혼 + 자녀 있음 → 1순위
 
 
-def test_newlywed_score_low_bands():
+def test_newlywed_score_low_bands_and_rank2():
     table = load_rules()["newlywed_score_table"]
     result = scoring.newlywed_score(
-        income_ratio_pct=120.0,  # 100% 초과 → 1
-        residence_years=0,  # 1년 미만 → 1
+        income_ratio_pct=120.0,  # 80% 초과 → 0
+        is_dual_income=False,
+        residence_years=0,  # 1년 미만/미거주 → 1
         payment_count=3,  # 6회 미만 → 0
         children_count=0,  # 0명 → 0
-        homeless_years=0,  # 1년 미만 → 1
+        marriage_years=6.0,  # 5~7년 → 1
+        is_single_parent=False,
+        has_child_under_2=False,
+        infants_count=0,
         table=table,
     )
-    assert result["priority_total"] == 2
-    assert result["general_total"] == 2
+    assert result["income"] == 0
+    assert result["total"] == 2  # 거주1 + 혼인1
+    assert result["rank"] == 2  # 자녀 없는 신혼 → 2순위
+
+
+def test_newborn_score_10point():
+    table = load_rules()["newborn_score_table"]
+    result = scoring.newborn_score(
+        income_ratio_pct=75.0,  # 외벌이 80% 이하 → 1
+        is_dual_income=False,
+        residence_years=3,  # 3년 이상 → 3
+        payment_count=24,  # 24회 이상 → 3
+        children_count=3,  # 3명 이상 → 3
+        table=table,
+    )
+    assert result["total"] == 10
+    assert result["max"] == 10
 
 
 # --- 신생아 특공 소득 트랙 분기 (우선 70 / 일반 20 / 추첨 10) ---------------
@@ -159,7 +183,7 @@ def test_newlywed_score_low_bands():
         (110.0, True, "priority"),  # 맞벌이 120% 이하
         (110.0, False, "general"),  # 외벌이 100~140%
         (145.0, True, "general"),  # 맞벌이 120~150%
-        (150.0, False, "lottery"),  # 외벌이 140% 초과 → 추첨
+        (150.0, False, None),  # 외벌이 140% 초과 → 부적격(B-8: 외벌이 추첨 상한 없음)
         (190.0, True, "lottery"),  # 맞벌이 150~200% → 추첨
         (210.0, True, None),  # 맞벌이 200% 초과 → 부적격
     ],
@@ -174,13 +198,16 @@ def test_newborn_track(ratio, dual, expected):
 
 def test_income_ratio_pct_uses_household_size_table():
     rules = load_rules()
-    # 3인 가구 기준 100% = 8,168,429원
+    # 분양 소득표 "3인 이하" 통합 행 100% = 7,533,763원 (B-2: 임대 3인 8,168,429과 다름)
     ratio = scoring.income_ratio_pct(
-        monthly_income_krw=8_168_429,
+        monthly_income_krw=7_533_763,
         household_size=3,
         rules=rules,
     )
     assert ratio == pytest.approx(100.0, abs=0.1)
+    # 1·2인도 "3인 이하" 통합 행을 쓴다
+    assert scoring.income_ratio_pct(7_533_763, 1, rules) == pytest.approx(100.0, abs=0.1)
+    assert scoring.income_ratio_pct(7_533_763, 2, rules) == pytest.approx(100.0, abs=0.1)
 
 
 def test_income_ratio_pct_household_over_8_extrapolates():

@@ -30,6 +30,9 @@ async def test_expected_tools_registered(tools):
     assert names == {
         "search_housing_notices",
         "get_notice_detail",
+        "search_lease_notices",
+        "get_lease_notice_detail",
+        "extract_lease_notice_text",
         "get_competition_stats",
         "update_my_profile",
         "get_my_profile",

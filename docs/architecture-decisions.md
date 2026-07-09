@@ -55,8 +55,8 @@ append-only 로그입니다. 새 결정은 아래에 이어서 추가하세요. 
 **배경**
 - **Plan A (현재 구현)**: 도메인을 여러 개의 잘게 나눈 도구로 제공하고
   (`search_housing_notices`, `get_notice_detail`, `get_competition_stats`,
-  `check_eligibility`, `recommend_housing`), 클라이언트 AI가 각 도구의
-  description을 읽고 스스로 오케스트레이션해서 사용자에게 답을 준다.
+  `analyze_my_subscription`, `recommend_housing` 등 현재 10개), 클라이언트 AI가 각
+  도구의 description을 읽고 스스로 오케스트레이션해서 사용자에게 답을 준다.
   이상적인 형태지만 AI의 tool-calling 능력에 크게 의존한다.
 - **Plan B (대안)**: 도메인마다 하나의 큰 flow-제어형 도구로 묶는다
   (개념적으로 `청약.py` / `임대.py` 한 개씩). MCP 서버가 흐름을 직접
@@ -67,8 +67,9 @@ append-only 로그입니다. 새 결정은 아래에 이어서 추가하세요. 
   명시한다 ([playmcp-guidelines.md](playmcp-guidelines.md)) — Plan A를
   무한정 세분화할 수 없다는 외부 제약이기도 하다.
 
-**결정 / 현재 입장**: 지금은 Plan A 유지(이미 구현됨, 5개 도구는 권장 범위
-3~10개 안). 임대 도메인을 새로 만들 때 이 결정을 다시 확인한다.
+**결정 / 현재 입장**: 지금은 Plan A 유지(이미 구현됨, 10개 도구로 권장 범위 3~10개의
+상한에 도달). 도구를 더 늘리면 권장 상한을 넘으므로, 임대 자격판정 등 신규 도메인은
+기존 도구 확장이나 flow-tool(Plan B) 전환을 함께 검토한다.
 
 **재검토 트리거**: PlayMCP 환경에서 실제 Kakao LLM의 tool-call 동작을
 관측할 수 있게 되는 시점, 또는 임대 도메인 설계 착수 시점.

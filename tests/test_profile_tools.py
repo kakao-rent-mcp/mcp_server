@@ -51,6 +51,7 @@ def test_profile_becomes_ready_when_required_fields_filled():
             age=34,
             residence_area="서울",
             homeless_duration_months=72,
+            owned_house_count=0,
             marriage=Marriage(is_married=True),
             dependents_count=3,
         ),

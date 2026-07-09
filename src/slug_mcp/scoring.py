@@ -11,13 +11,26 @@ from typing import Any
 # --- 민영주택 일반공급 가점 (84점 만점, §3.B — 🟢 청약홈 확인) --------------
 
 
-def score_homeless_period(age: int, is_married: bool, homeless_duration_months: int) -> int:
-    """무주택 기간 가점 (최대 32점). 만 30세(또는 그 전 혼인)부터 산정한다."""
+def score_homeless_period(
+    age: int,
+    is_married: bool,
+    homeless_duration_months: int,
+    recognized_cap_months: int | None = None,
+) -> int:
+    """무주택 기간 가점 (최대 32점). 만 30세(또는 그 전 혼인)부터 산정한다.
+
+    recognized_cap_months가 주어지면 입력 무주택기간을 그 상한으로 자른다(별표 1의
+    "만 30세·혼인신고일 기산" 보정, 상한은 engine이 나이·혼인일로 계산). 생년월일이
+    없어 만 나이 기준 근사이므로 최대 약 1년까지 과소 산정될 수 있다.
+    """
     if not is_married and age < 30:
         return 0
-    if homeless_duration_months <= 0:  # 유주택
+    months = homeless_duration_months
+    if recognized_cap_months is not None:
+        months = min(months, max(0, recognized_cap_months))
+    if months <= 0:  # 유주택이거나 기산 상한이 0
         return 0
-    years = homeless_duration_months // 12
+    years = months // 12
     if years < 1:
         return 2
     if years >= 15:
@@ -66,9 +79,12 @@ def private_general_score(
     dependents_count: int,
     duration_months: int,
     spouse_duration_months: int = 0,
+    homeless_recognized_cap_months: int | None = None,
 ) -> dict[str, int]:
     """민영 일반공급 가점 합계와 항목별 점수를 돌려준다."""
-    homeless = score_homeless_period(age, is_married, homeless_duration_months)
+    homeless = score_homeless_period(
+        age, is_married, homeless_duration_months, homeless_recognized_cap_months
+    )
     dependents = score_dependents(dependents_count)
     subscription = score_subscription_period(duration_months, spouse_duration_months)
     return {
@@ -120,72 +136,93 @@ def multi_child_score(
     }
 
 
-# --- 신혼부부 특별공급 배점 (LH 2026-07-05 확인: 우선 9점 / 일반 12점) -------
+# --- 신혼부부 특별공급 배점 (공공 일반형: 별표 6 순위제 + 경쟁 시 13점) -------
+
+
+def _income_point(income_ratio_pct: float, is_dual_income: bool, cfg: dict[str, Any]) -> int:
+    """가구소득 배점: 외벌이 single_max%·맞벌이 dual_max% 이하면 points, 초과 0."""
+    cap = cfg["dual_max"] if is_dual_income else cfg["single_max"]
+    return cfg["points"] if income_ratio_pct <= cap else 0
 
 
 def newlywed_score(
     income_ratio_pct: float,
+    is_dual_income: bool,
     residence_years: int,
     payment_count: int,
     children_count: int,
-    homeless_years: int,
+    marriage_years: float | None,
+    is_single_parent: bool,
+    has_child_under_2: bool,
+    infants_count: int,
     table: dict[str, Any],
-) -> dict[str, int]:
-    """신혼부부 특공 배점.
+) -> dict[str, Any]:
+    """신혼부부 특공(공공 일반형) 배점 — 순위제 + 경쟁 시 13점 만점(별표 6).
 
-    우선공급 경쟁 시 [가구소득+거주기간+납입횟수] 9점 만점,
-    일반공급 경쟁 시 [거주기간+납입횟수+자녀수+무주택기간] 12점 만점.
+    나눔형·토지임대부(별표 6의6)는 5항목 각 3점(우선 9점/일반 12점)의 별도 체계이며,
+    여기서는 가장 흔한 일반형만 계산한다(공고 유형이 다르면 공고문이 우선).
     """
-    t = table
-    if income_ratio_pct <= t["income_ratio"]["high"]["max_ratio"]:
-        income = t["income_ratio"]["high"]["points"]
-    elif income_ratio_pct <= t["income_ratio"]["mid"]["max_ratio"]:
-        income = t["income_ratio"]["mid"]["points"]
-    else:
-        income = t["income_ratio"]["low"]["points"]
+    income = _income_point(income_ratio_pct, is_dual_income, table["income"])
+    children = _band_score(children_count, table["children_count"])
+    residence = _band_score(residence_years, table["residence_years"])
+    payments = _band_score(payment_count, table["payment_count"])
 
-    if residence_years >= t["residence_years"]["high"]["min_years"]:
-        residence = t["residence_years"]["high"]["points"]
-    elif residence_years >= t["residence_years"]["mid"]["min_years"]:
-        residence = t["residence_years"]["mid"]["points"]
+    mt = table["marriage_years"]
+    if marriage_years is not None:
+        if marriage_years <= mt["high_max"]:
+            marriage = 3
+        elif marriage_years <= mt["mid_max"]:
+            marriage = 2
+        elif marriage_years <= mt["low_max"]:
+            marriage = 1
+        else:
+            marriage = 0
+    elif is_single_parent:
+        # 한부모는 이 항목을 막내 자녀 나이로 매긴다(정확한 나이 미수집 → 근사).
+        marriage = 3 if has_child_under_2 else (2 if infants_count > 0 else 1)
     else:
-        residence = t["residence_years"]["low"]["points"]
+        marriage = 1  # 혼인기간 미상(혼인신고일 미입력) — 최소점 가정
 
-    if payment_count >= t["payment_count"]["high"]["min_count"]:
-        payments = t["payment_count"]["high"]["points"]
-    elif payment_count >= t["payment_count"]["mid"]["min_count"]:
-        payments = t["payment_count"]["mid"]["points"]
-    elif payment_count >= t["payment_count"]["low"]["min_count"]:
-        payments = t["payment_count"]["low"]["points"]
-    else:
-        payments = 0
-
-    if children_count >= t["children_count"]["high"]["min_count"]:
-        children = t["children_count"]["high"]["points"]
-    elif children_count >= t["children_count"]["mid"]["min_count"]:
-        children = t["children_count"]["mid"]["points"]
-    elif children_count >= t["children_count"]["low"]["min_count"]:
-        children = t["children_count"]["low"]["points"]
-    else:
-        children = 0
-
-    if homeless_years >= t["homeless_years"]["high"]["min_years"]:
-        homeless = t["homeless_years"]["high"]["points"]
-    elif homeless_years >= t["homeless_years"]["mid"]["min_years"]:
-        homeless = t["homeless_years"]["mid"]["points"]
-    else:
-        homeless = t["homeless_years"]["low"]["points"]
-
+    # 1순위: 혼인기간 중 자녀가 있는 신혼부부 또는 한부모가족.
+    is_rank1 = is_single_parent or (marriage_years is not None and children_count > 0)
+    total = income + children + residence + payments + marriage
     return {
+        "rank": 1 if is_rank1 else 2,
         "income": income,
+        "children": children,
         "residence_period": residence,
         "payment_count": payments,
+        "marriage_period": marriage,
+        "total": total,
+        "max": 13,
+    }
+
+
+def newborn_score(
+    income_ratio_pct: float,
+    is_dual_income: bool,
+    residence_years: int,
+    payment_count: int,
+    children_count: int,
+    table: dict[str, Any],
+) -> dict[str, int]:
+    """신생아 특공(공공) 우선·일반공급 경쟁 배점 — 10점 만점.
+
+    물량 배정(우선/일반/추첨)만으로 당첨이 정해지지 않고, 경쟁 시 해당지역 →
+    이 배점 다득점순 → 추첨으로 선정된다(가구소득1+자녀수3+거주3+납입3).
+    """
+    income = _income_point(income_ratio_pct, is_dual_income, table["income"])
+    children = _band_score(children_count, table["children_count"])
+    residence = _band_score(residence_years, table["residence_years"])
+    payments = _band_score(payment_count, table["payment_count"])
+    total = income + children + residence + payments
+    return {
+        "income": income,
         "children": children,
-        "homeless_period": homeless,
-        "priority_total": income + residence + payments,
-        "priority_max": 9,
-        "general_total": residence + payments + children + homeless,
-        "general_max": 12,
+        "residence_period": residence,
+        "payment_count": payments,
+        "total": total,
+        "max": 10,
     }
 
 
@@ -204,9 +241,11 @@ def newborn_track(income_ratio_pct: float, is_dual_income: bool, cfg: dict[str, 
         return "priority"
     if income_ratio_pct <= general_cap:
         return "general"
+    # 추첨공급: 맞벌이만 상한(200%)까지 완화한다. 외벌이는 일반공급 상한(140%)을
+    # 넘으면 어떤 트랙에도 해당하지 않는 부적격이다(외벌이 추첨 상한 없음).
     if is_dual_income:
         return "lottery" if income_ratio_pct <= cfg["lottery"]["income_ratio_dual_max"] else None
-    return "lottery"  # 외벌이 140% 초과는 자산요건 충족 전제 추첨 대상
+    return None
 
 
 # --- 가구원수별 소득비율 -----------------------------------------------------
@@ -216,7 +255,9 @@ def income_ratio_pct(monthly_income_krw: int, household_size: int, rules: dict[s
     """세전 월소득이 도시근로자 가구원수별 월평균소득의 몇 %인지 계산한다."""
     table: dict[str, int] = rules["urban_worker_monthly_income_krw"]
     size = max(1, household_size)
-    if str(size) in table:
+    if size <= 3:
+        baseline = table["3"]  # 분양 소득표는 1·2·3인을 "3인 이하" 통합 행으로 적용
+    elif str(size) in table:
         baseline = table[str(size)]
     else:
         baseline = table["8"] + (size - 8) * rules["extra_person_income_krw"]

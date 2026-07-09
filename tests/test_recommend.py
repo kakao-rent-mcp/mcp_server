@@ -61,6 +61,7 @@ def _complete_patch(**overrides: object) -> dict:
             "residence_area": "경기",
             "residence_years_in_region": 4,
             "homeless_duration_months": 72,
+            "owned_house_count": 0,
             "marriage": {"is_married": True, "marriage_date": "2021-03-10"},
             "children_count": 2,
             "infants_count": 1,
@@ -239,7 +240,7 @@ async def test_recommend_attaches_comparable_competition():
     assert "3.79:1" in comp["summary"]
     # 확률 라벨은 더 이상 제공하지 않는다
     assert "feasibility" not in top
-    assert result["analysis_summary"]["private_general_score"] == 45
+    assert result["analysis_summary"]["private_general_score"] == 43
 
 
 @respx.mock
@@ -348,6 +349,7 @@ async def test_recommend_skips_public_notice_for_homeowner():
         None,
         _complete_patch(
             **{
+                "user_profile.owned_house_count": 1,  # 유주택 → 공공 전체 부적격
                 "user_profile.homeless_duration_months": 0,
                 "user_profile.has_child_under_2": False,
                 "user_profile.children_count": 0,
