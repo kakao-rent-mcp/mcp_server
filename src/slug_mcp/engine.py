@@ -118,6 +118,32 @@ def _years_since(date_str: str, as_of: date) -> float:
     return (as_of - parsed).days / 365.25
 
 
+def homeless_household_member(
+    household_owns_home: bool,
+    owns_home_self: bool | None,
+    home_owner_is_ascendant_60plus: bool | None,
+) -> tuple[bool, str]:
+    """무주택세대구성원 여부와 판정 근거를 돌려준다 (is_homeless, basis).
+
+    청약 무주택 판정은 개인이 아니라 세대(주민등록등본) 단위다. 세대가 주택을 보유해도
+    그 소유자가 본인이 아니라 만 60세 이상 직계존속이면 주택공급규칙 제53조로 무주택
+    간주한다(노부모부양 특공·공공임대는 예외지만 둘 다 미구현이라 충돌 없음).
+
+    - 세대 무주택 → 무주택 (basis="no_owned_house")
+    - 세대 보유 & 본인/배우자 소유 → 유주택 (예외 없음, basis="owns_home_self")
+    - 세대 보유 & 만 60세 이상 직계존속 소유 → 무주택 간주
+      (basis="elderly_ascendant_exception")
+    - 세대 보유 & 그 외 → 유주택 세대 (basis="household_owns_home")
+    """
+    if not household_owns_home:
+        return True, "no_owned_house"
+    if owns_home_self is True:
+        return False, "owns_home_self"
+    if home_owner_is_ascendant_60plus is True:
+        return True, "elderly_ascendant_exception"
+    return False, "household_owns_home"
+
+
 def _homeless_recognized_cap_months(
     age: int, is_married: bool, marriage_date: str | None, as_of: date
 ) -> int:
@@ -197,15 +223,24 @@ def analyze(
     infants = user.infants_count or 0
     household_size = dependents + 1  # 부양가족(본인 제외) + 본인
     income_ratio = scoring.income_ratio_pct(monthly_income, household_size, rules)
-    homeless_years = homeless_months // 12
     residence_years = user.residence_years_in_region or 0
     account_years = duration_months // 12
     regulated = is_regulated_region(target_region)
     desired_size = target.desired_size_sqm
     owned_house_count = user.owned_house_count
     account_type = account.account_type
-    # 유주택 판정: 주택 보유 수를 우선 사용하고, 미입력 시에만 무주택기간 0 프록시로 대체.
-    is_homeowner = owned_house_count > 0 if owned_house_count is not None else homeless_months == 0
+    # 유주택 판정(세대 단위): 주택 보유 수를 우선 사용하고, 미입력 시에만 무주택기간 0 프록시로
+    # 대체한다. 세대가 보유해도 만 60세 이상 직계존속 소유면 제53조로 무주택 간주한다.
+    household_owns_home = (
+        owned_house_count > 0 if owned_house_count is not None else homeless_months == 0
+    )
+    is_homeless_hhm, ownership_basis = homeless_household_member(
+        household_owns_home, user.owns_home_self, user.home_owner_is_ascendant_60plus
+    )
+    is_homeowner = not is_homeless_hhm
+    # 유주택 세대면 무주택기간 가점이 붙지 않게 0으로 누른다(입력값 오적용 방지).
+    effective_homeless_months = homeless_months if is_homeless_hhm else 0
+    homeless_years = effective_homeless_months // 12
 
     # ---- 1단계 Hard Filter (§3) ------------------------------------------
     # 민영 특공은 미구현(스펙 §5.C 🔴 미검증)이라 별도 차단 플래그 없이
@@ -225,6 +260,13 @@ def analyze(
     homeowner_blocks_private_general = is_homeowner and regulated
     if is_homeowner:
         public_blocked = True
+        # 소유자가 본인이 아니면(세대원 소유), 60세 예외·세대분리로 무주택 인정 여지를 안내한다.
+        exception_hint = (
+            " 다만 그 주택 소유자가 만 60세 이상 직계존속이거나 세대분리를 하면 무주택자로 "
+            "인정될 수 있습니다(home_owner_is_ascendant_60plus 확인)."
+            if ownership_basis == "household_owns_home"
+            else ""
+        )
         disqualifications.append(
             {
                 "filter": "Filter-01(무주택)",
@@ -234,10 +276,18 @@ def analyze(
                     "(규칙 제28조⑥)."
                     if regulated
                     else "민영 일반공급(가점제)은 신청 가능하나 무주택기간 가점이 0점입니다."
-                ),
+                )
+                + exception_hint,
                 "blocked_tracks": ["public_all", "private_special"]
                 + (["private_general"] if regulated else []),
             }
+        )
+    elif ownership_basis == "elderly_ascendant_exception":
+        notes.append(
+            "만 60세 이상 직계존속이 소유한 주택은 주택공급규칙 제53조에 따라 무주택으로 "
+            "간주했습니다(공동명의면 부모 전원이 60세 이상이어야 하며, 노부모부양 특별공급·"
+            "공공임대는 예외입니다). 실제 신청 전 청약홈 무주택세대구성원 자가진단으로 "
+            "재확인하세요(🟡)."
         )
 
     # Filter-02 · 공공분양 자산 컷. 특별공급 전체(면적 무관) + 60㎡ 이하 일반공급에 적용(B-9).
@@ -490,7 +540,7 @@ def analyze(
     homeless_cap_months = _homeless_recognized_cap_months(
         age, is_married, user.marriage.marriage_date, as_of
     )
-    if homeless_cap_months < homeless_months:
+    if homeless_cap_months < effective_homeless_months:
         notes.append(
             "무주택기간 가점은 만 30세(또는 그 전 혼인신고일)부터만 인정되어 입력값보다 "
             "짧게 반영했습니다(생년월일이 없어 만 나이 기준 근사)."
@@ -498,7 +548,7 @@ def analyze(
     private_breakdown = scoring.private_general_score(
         age=age,
         is_married=is_married,
-        homeless_duration_months=homeless_months,
+        homeless_duration_months=effective_homeless_months,
         dependents_count=dependents,
         duration_months=duration_months,
         spouse_duration_months=account.spouse_duration_months,
@@ -561,6 +611,11 @@ def analyze(
     # ---- 4단계 컷오프 대조 + 강제 매칭 (§6) --------------------------------
     grade = region_grade(target_region)
     cutoffs = rules["expected_cutoffs"][grade]
+    notes.append(
+        "expected_cutoffs는 지역 등급 기반 참고 기준선(2026 계획 추정치)이지 실제 당첨 컷이 "
+        "아닙니다(cutoff_basis=planning_estimate). 특정 단지의 실제 경쟁률은 "
+        "recommend_housing의 유사 과거 실적으로 확인하세요."
+    )
     private_score: int = private_breakdown["total"]
     private_pct = private_feasibility_pct(
         private_score, cutoffs["private_score_min"], cutoffs["private_score_max"]
@@ -639,7 +694,7 @@ def analyze(
             {
                 "type": "공공분양 일반공급(순차제)",
                 "reason": f"1순위 요건 충족, 저축 인정총액 {recognized_krw:,}원 "
-                f"(목표지역 예상 컷 {cutoffs['public_balance_min_krw']:,}원).",
+                f"(목표지역 참고 기준선 {cutoffs['public_balance_min_krw']:,}원 — 관측값 아님).",
             }
         )
     # 민영 일반공급: 규제지역 유주택 세대는 가점제 대상에서 제외(B-12).
@@ -648,9 +703,9 @@ def analyze(
             recommended_tracks.append(
                 {
                     "type": "민영주택 일반공급 가점제",
-                    "reason": f"가점 {private_score}점으로 목표지역 예상 컷"
-                    f"({cutoffs['private_score_min']}~{cutoffs['private_score_max']}점) "
-                    "범위에 듭니다.",
+                    "reason": f"가점 {private_score}점으로 목표지역 참고 기준선"
+                    f"({cutoffs['private_score_min']}~{cutoffs['private_score_max']}점, 관측값 "
+                    "아님) 범위에 듭니다. 실제 경쟁률은 recommend_housing으로 확인하세요.",
                 }
             )
         elif regulated:
@@ -658,8 +713,9 @@ def analyze(
             recommended_tracks.append(
                 {
                     "type": "민영주택 일반공급 추첨제(규제지역·물량 적음)",
-                    "reason": f"가점 {private_score}점으로 예상 컷"
-                    f"({cutoffs['private_score_min']}점) 미달. 규제지역은 추첨 물량이 적어 "
+                    "reason": f"가점 {private_score}점으로 참고 기준선"
+                    f"({cutoffs['private_score_min']}점, 관측값 아님) 미달. 규제지역은 추첨 물량이 "
+                    "적어 "
                     "(85㎡ 초과도 투기과열 20%/청약과열 50%) 당첨 가능성이 낮으니 "
                     "특별공급·비규제 대안을 함께 검토하세요.",
                 }
@@ -668,9 +724,9 @@ def analyze(
             recommended_tracks.append(
                 {
                     "type": "민영주택 일반공급 추첨제",
-                    "reason": f"가점 {private_score}점으로 예상 컷"
-                    f"({cutoffs['private_score_min']}점) 미달 — 비규제지역은 전용 85㎡ 초과 "
-                    "대형 등 추첨 물량(추첨 100%)이 많아 공략이 현실적입니다.",
+                    "reason": f"가점 {private_score}점으로 참고 기준선"
+                    f"({cutoffs['private_score_min']}점, 관측값 아님) 미달 — 비규제지역은 전용 "
+                    "85㎡ 초과 대형 등 추첨 물량(추첨 100%)이 많아 공략이 현실적입니다.",
                 }
             )
     elif is_eligible_for_private and homeowner_blocks_private_general:
@@ -725,6 +781,8 @@ def analyze(
             "is_eligible_for_public": is_eligible_for_public,
             "is_eligible_for_private": is_eligible_for_private,
             "is_eligible_for_private_rank1": is_eligible_for_private_rank1,
+            "is_homeless_household_member": is_homeless_hhm,
+            "homeless_status_basis": ownership_basis,
             "disqualification_reasons": disqualifications,
         },
         "scores": {
@@ -738,6 +796,7 @@ def analyze(
             "region_grade": grade,
             "is_regulated_region": regulated,
             "expected_cutoffs": cutoffs,
+            "cutoff_basis": "planning_estimate",  # 지역 등급 기반 참고 기준선(관측값 아님)
             "feasibility_by_track": feasibility_by_track,
             "feasibility_level": feasibility_label(best_pct),
             "recommended_tracks": recommended_tracks,

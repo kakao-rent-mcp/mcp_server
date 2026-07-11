@@ -159,6 +159,17 @@ class UserProfile(BaseModel):
         description="세대가 보유한 주택 수(분양권·입주권 포함). 0=무주택세대. "
         "무주택 여부와 2주택 이상 세대 1순위 제한 판정에 사용(무주택기간 가점과 별개)",
     )
+    owns_home_self: bool | None = Field(
+        default=None,
+        description="세대 보유 주택의 소유자가 본인 또는 배우자인지 여부. "
+        "True면 만 60세 이상 직계존속 예외(제53조)를 적용하지 않는다",
+    )
+    home_owner_is_ascendant_60plus: bool | None = Field(
+        default=None,
+        description="세대 보유 주택의 소유자가 직계존속(부모·조부모)이고 만 60세 이상인지 여부. "
+        "주택공급규칙 제53조에 따라 만 60세 이상 직계존속 소유 주택은 무주택으로 간주된다"
+        "(공동명의면 소유자 전원이 60세 이상이어야 함). 노부모부양 특공·공공임대는 예외",
+    )
     marriage: Marriage = Field(default_factory=Marriage)
     children_count: int | None = Field(
         default=None, ge=0, description="미성년 자녀 수 (태아·입양 포함)"
@@ -215,6 +226,13 @@ REQUIRED_FIELD_QUESTIONS: dict[str, str] = {
 
 # 있으면 판정 정확도가 올라가는 필드와 안내 질문.
 OPTIONAL_FIELD_QUESTIONS: dict[str, str] = {
+    "user_profile.owns_home_self": (
+        "그 주택을 본인 또는 배우자가 소유하고 있나요? (부모 등 세대원 소유면 '아니오')"
+    ),
+    "user_profile.home_owner_is_ascendant_60plus": (
+        "주택 소유자가 부모 등 직계존속이고 만 60세 이상인가요? "
+        "(공동명의면 소유자 모두 60세 이상일 때만 '예' — 제53조 무주택 간주)"
+    ),
     "user_profile.is_head_of_household": "세대주이신가요? (규제지역 1순위 판정에 필요)",
     "user_profile.residence_years_in_region": (
         "지금 거주 중인 시·도에 몇 년째 연속 거주 중이신가요?"

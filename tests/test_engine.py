@@ -129,6 +129,57 @@ def test_filter01_homeowner_blocks_public_but_not_private_general():
     assert result["scores"]["private_score_breakdown"]["homeless_period"] == 0
     assert result["scores"]["special_supply_scores"]["newborn"] is None  # 특공 차단
     assert any("Filter-01" in r["filter"] for r in status["disqualification_reasons"])
+    # 소유자 정보가 없으면 세대 보유(유주택)로 보고, 60세 예외·세대분리 여지를 안내한다.
+    assert status["homeless_status_basis"] == "household_owns_home"
+    assert status["is_homeless_household_member"] is False
+    assert any(
+        "60세" in r["reason"]
+        for r in status["disqualification_reasons"]
+        if "Filter-01" in r["filter"]
+    )
+
+
+def test_filter01_self_ownership_blocks_and_zeros_homeless_gapoint():
+    """본인 소유(60세 예외 미적용)면 무주택기간 입력값과 무관하게 가점이 0이 된다."""
+    result = engine.analyze(
+        _complete_doc(
+            **{
+                "user_profile.owned_house_count": 1,
+                "user_profile.owns_home_self": True,
+                "user_profile.residence_area": "부산",
+                "target_housing.target_region": "부산",
+            }
+        ),
+        as_of=AS_OF,
+    )
+    status = result["eligibility_status"]
+    assert status["homeless_status_basis"] == "owns_home_self"
+    assert status["is_eligible_for_public"] is False
+    # homeless_duration_months=72로 들어와도 유주택 세대라 무주택 가점 0
+    assert result["scores"]["private_score_breakdown"]["homeless_period"] == 0
+
+
+def test_filter01_elderly_ascendant_exception_treats_as_homeless():
+    """만 60세 이상 직계존속 소유 주택은 제53조로 무주택 간주 → 공공·특공 자격 회복."""
+    result = engine.analyze(
+        _complete_doc(
+            **{
+                "user_profile.owned_house_count": 1,
+                "user_profile.owns_home_self": False,
+                "user_profile.home_owner_is_ascendant_60plus": True,
+                "user_profile.residence_area": "부산",
+                "target_housing.target_region": "부산",
+            }
+        ),
+        as_of=AS_OF,
+    )
+    status = result["eligibility_status"]
+    assert status["is_homeless_household_member"] is True
+    assert status["homeless_status_basis"] == "elderly_ascendant_exception"
+    assert status["is_eligible_for_public"] is True
+    # 무주택으로 인정되므로 무주택기간 가점도 정상 산정된다.
+    assert result["scores"]["private_score_breakdown"]["homeless_period"] > 0
+    assert any("제53조" in note for note in result["verification_notes"])
 
 
 def test_filter02_asset_cutoff_applies_only_under_60sqm():
@@ -315,6 +366,15 @@ def test_matching_analysis_grades_target_region():
     assert matching["is_regulated_region"] is True
     # 가점 45점 vs S급 컷 69~74 → 매우낮음
     assert "매우낮음" in matching["feasibility_by_track"]["private_general"]
+
+
+def test_expected_cutoffs_labeled_as_planning_estimate_not_observed():
+    """컷오프는 예측이 아니라 참고 기준선임을 출력·검증노트로 명확히 한다."""
+    result = engine.analyze(_complete_doc(), as_of=AS_OF)
+    matching = result["matching_analysis"]
+    assert matching["cutoff_basis"] == "planning_estimate"
+    assert matching["expected_cutoffs"]  # 내부 판정 기준선은 그대로 유지
+    assert any("참고 기준선" in note for note in result["verification_notes"])
 
 
 def test_recommended_tracks_prioritize_newborn_when_eligible():
