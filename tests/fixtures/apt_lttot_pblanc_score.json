@@ -1,0 +1,52 @@
+{
+  "page": 1,
+  "perPage": 50,
+  "totalCount": 4,
+  "currentCount": 4,
+  "data": [
+    {
+      "HOUSE_MANAGE_NO": "2026000281",
+      "PBLANC_NO": "2026000281",
+      "HOUSE_TY": "084.9800A",
+      "MODEL_NO": "01",
+      "RESIDE_SECD": "01",
+      "RESIDE_SENM": "해당지역",
+      "LWET_SCORE": "60",
+      "AVRG_SCORE": "64",
+      "TOP_SCORE": "69"
+    },
+    {
+      "HOUSE_MANAGE_NO": "2026000281",
+      "PBLANC_NO": "2026000281",
+      "HOUSE_TY": "084.9800A",
+      "MODEL_NO": "01",
+      "RESIDE_SECD": "02",
+      "RESIDE_SENM": "기타지역",
+      "LWET_SCORE": "72",
+      "AVRG_SCORE": "74",
+      "TOP_SCORE": "79"
+    },
+    {
+      "HOUSE_MANAGE_NO": "2026000281",
+      "PBLANC_NO": "2026000281",
+      "HOUSE_TY": "059.9700B",
+      "MODEL_NO": "02",
+      "RESIDE_SECD": "01",
+      "RESIDE_SENM": "해당지역",
+      "LWET_SCORE": "50",
+      "AVRG_SCORE": "55",
+      "TOP_SCORE": "62"
+    },
+    {
+      "HOUSE_MANAGE_NO": "2026000281",
+      "PBLANC_NO": "2026000281",
+      "HOUSE_TY": "101.2600A",
+      "MODEL_NO": "03",
+      "RESIDE_SECD": "01",
+      "RESIDE_SENM": "해당지역",
+      "LWET_SCORE": "-",
+      "AVRG_SCORE": "-",
+      "TOP_SCORE": "-"
+    }
+  ]
+}

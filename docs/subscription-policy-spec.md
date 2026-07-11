@@ -52,9 +52,19 @@
 
 룰 엔진은 자연어를 파싱하지 않는다. MCP 클라이언트(LLM)가 아래 구조로 정규화해 넘긴다.
 필드명은 구현부(`models.py`의 `ProfileDocument`)와 1:1 매핑된다. 구현에서는 모든 필드가
-선택 입력이며, 대화 몇 번에 걸쳐 `update_my_profile`로 조각조각 채워진다 — 필수 항목이
-비면 엔진이 "물어볼 질문 목록"을 돌려준다. 다자녀 세대구성 가점용
-`is_three_generation_household`/`is_single_parent` 두 필드는 구현에서 추가되었다.
+선택 입력이며, 대화 몇 번에 걸쳐 `update_my_profile`로 조각조각 채워진다.
+
+**필드 계층(구현):** `models.py`는 필수 항목을 두 단계로 나눈다 — `CORE_FIELD_QUESTIONS`(나이·
+거주지·주택수·목표지역·통장 가입기간)가 모두 차면 **잠정 판정**(`confidence:"provisional"`)이
+가능하고, `FULL_FIELD_QUESTIONS`(무주택기간·혼인·부양가족·월소득·예치금)까지 채우면 **정밀
+판정**이 된다. core가 비면 엔진이 "물어볼 질문 목록"(needs_more_info)을 돌려주고, full이 비면
+판정은 수행하되 해당 트랙 점수를 '미확정'으로 표시하고 `action_items`로 채우라고 안내한다.
+
+**대체 충족:** `birth_date`(생년월일)는 `age`와 `homeless_duration_months`를 대신한다
+(`_SATISFYING_ALTERNATIVES`) — 생년월일이 있으면 엔진이 만 나이와 무주택 인정기간(만 30세
+기산, 30세 전 혼인 시 혼인신고일, 처분 이력은 `homeless_since_date`)을 정확히 계산한다.
+다자녀 세대구성 가점용 `is_three_generation_household`/`is_single_parent` 두 필드는 구현에서
+추가되었다.
 
 ```jsonc
 {
@@ -65,10 +75,15 @@
   },
   "user_profile": {
     "age": 34,
+    "birth_date": "1991-05-02",            // 생년월일(YYYY-MM-DD). 있으면 age·무주택기간을 정확 계산
     "is_head_of_household": true,          // 세대주 여부
     "residence_area": "서울",              // 주민등록 거주 시·도
     "residence_years_in_region": 4,        // 해당 시·도 연속 거주 연수
-    "homeless_duration_months": 36,        // 무주택 기간(월). 0 = 유주택
+    "homeless_duration_months": 36,        // 본인 무주택 기간(월, 가점용). birth_date 있으면 자동 계산
+    "homeless_since_date": null,           // 주택 처분 후 무주택이 된 날(YYYY-MM-DD). 기산 보정용
+    "owned_house_count": 0,                // 세대 보유 주택 수. 0=무주택세대
+    "owns_home_self": false,               // 보유 주택 소유자가 본인·배우자인지(제53조 예외 배제용)
+    "home_owner_is_ascendant_60plus": null,// 소유자가 만 60세 이상 직계존속인지(제53조 무주택 간주)
     "marriage": {
       "is_married": true,
       "marriage_date": "2021-03-10",
@@ -112,12 +127,22 @@
 
 하나라도 걸리면 해당 트랙의 점수 연산을 생략하고 `disqualification_reasons`에 사유를 담아 반환한다.
 
-### Filter-01 · 무주택 요건  `검증: 🟡`
-- **조건**: `homeless_duration_months == 0` (유주택)
-- **결과**: **공공분양 전체(일반+특공)**, **민영 특별공급 전체** 진입 불가.
-- **주의**: **민영주택 일반공급(가점제)은 유주택자도 신청 가능**하다 — 배제가 아니라
-  무주택기간 점수가 0~2점으로 낮아질 뿐(§3.B.①). Hard Filter를 민영 일반공급에
-  적용하면 안 된다.
+### Filter-01 · 무주택 요건 (세대 단위)  `검증: 🟡`
+- **판정 단위**: 개인이 아니라 **무주택세대구성원**(주민등록등본상 세대 전원 무주택). 미혼이라도
+  부모와 같은 등본이면 부모 주택이 세대에 귀속된다.
+- **조건**: `engine.homeless_household_member(...)`가 유주택으로 판정하면 차단. 세대 주택 보유는
+  `owned_house_count > 0`(미입력 시 `homeless_duration_months == 0` 프록시)로 본다. **단**
+  그 주택 소유자가 본인이 아니라(`owns_home_self != true`) 만 60세 이상 직계존속
+  (`home_owner_is_ascendant_60plus == true`)이면 **주택공급규칙 제53조로 무주택 간주**한다.
+- **결과**: 유주택 세대면 **공공분양 전체(일반+특공)**, **민영 특별공급 전체** 진입 불가.
+  판정 결과는 `eligibility_status.is_homeless_household_member`/`homeless_status_basis`로 노출한다.
+- **가점 정합성**: 유주택 세대로 판정되면 `effective_homeless_months=0`으로 눌러 무주택기간
+  가점이 붙지 않게 한다(입력값과 무관).
+- **60세 예외 범위**: 엔진이 구현한 트랙(공공/민영 일반공급·신생아/신혼/다자녀/생애최초 특공)은
+  전부 제53조 예외 적용 대상이다. 예외의 예외인 노부모부양 특공·공공임대는 미구현이라 충돌 없다.
+- **주의**: **민영주택 일반공급(가점제)은 유주택자도 신청 가능**하다(비규제지역) — 배제가 아니라
+  무주택기간 점수가 0~2점으로 낮아질 뿐(§3.B.①). 규제지역 유주택 세대는 가점제에서도 제외된다
+  (규칙 제28조⑥).
 
 ### Filter-02 · 공공분양 자산 컷오프 (전용 60㎡ 이하 신청 시)  `검증: 🟡 원문 대조`
 - **조건 A**: `total_real_estate_krw > 215,500,000` → 부동산 자산 초과
@@ -260,10 +285,16 @@ def score_subscription(a):
 
 ## 6. 4단계 — 목표지역 컷오프 대조 & 강제 매칭 엔진
 
-> 아래 컷오프는 **예상치(참고용 DB)**이며 법정 기준이 아니다. 실시간 값은
-> `get_competition_stats`(과거 경쟁률·당첨가점 API)로 보정하는 것을 권장한다.
+> 아래 컷오프는 **참고 기준선(planning estimate)**이며 법정 기준도, 관측된 실제 컷도 아니다.
+> `analyze`는 이 정적 밴드를 **내부 판정 기준선**으로만 쓰고, 출력에
+> `cutoff_basis: "planning_estimate"`를 붙여 예측이 아님을 명시한다(추천 트랙 사유도 "참고
+> 기준선(관측값 아님)"으로 표기). **실제 과거 실적**은 `recommend_housing`이 같은 시군구·트랙의
+> 마감 공고 **경쟁률**과, 민영 트랙은 추가로 **해당지역 최저 당첨가점(`LWET_SCORE`, 관측값)**을
+> 회원 가점과 대조해 제시한다(`observed_winning_score`, 확률 추정 대신 실측). ⚠️ 이 정적 밴드를
+> 걷어내면 실현가능성·가점제/추첨제 분기·대안지역·강제매칭이 모두 근거를 잃으므로 제거하지 말고
+> **라벨만 격하**한다.
 
-### A. 지역 등급별 예상 컷오프 (2026 예상)
+### A. 지역 등급별 참고 컷오프 기준선 (2026 계획 추정치, 관측값 아님)
 
 | 등급 | 대표 지역 | 민영 가점 컷오프 | 공공 저축총액 컷오프 |
 |---|---|---|---|
@@ -289,9 +320,15 @@ def score_subscription(a):
 
 ```jsonc
 {
+  "status": "ok",                        // ok | needs_more_info | session_not_found
+  "confidence": "provisional",           // provisional(core만) | complete(full까지). needs_more_info면 없음
+  "headline": "[잠정 판정] 가장 유망한 트랙은 '...'입니다. 추가 정보를 입력하면 판정이 더 정확해집니다.",
   "eligibility_status": {
     "is_eligible_for_public": true,
     "is_eligible_for_private": true,
+    "is_eligible_for_private_rank1": true,
+    "is_homeless_household_member": true,  // 세대 단위 무주택 판정 결과
+    "homeless_status_basis": "no_owned_house", // owns_home_self|elderly_ascendant_exception|household_owns_home|no_owned_house
     "disqualification_reasons": []      // 부적격 시 Filter 코드+사유
   },
   "scores": {
@@ -305,7 +342,8 @@ def score_subscription(a):
   },
   "matching_analysis": {
     "target_region_evaluated": "서울(규제)",
-    "feasibility_level": "보통 (Probability: 40%)", // 매우높음|높음|보통|낮음|매우낮음
+    "cutoff_basis": "planning_estimate",  // expected_cutoffs는 참고 기준선(관측값 아님)
+    "feasibility_level": "보통(추정)",      // 매우높음|높음|보통|낮음|매우낮음 (프로필·등급 기반 추정)
     "recommended_tracks": [
       { "type": "민영주택 일반공급 추첨제",
         "reason": "가점 45점으로 당첨선(65점) 미달, 85㎡ 이하 추첨 물량 공략이 현실적." },
@@ -317,11 +355,24 @@ def score_subscription(a):
         "reason": "당첨 저축총액선이 서울 대비 약 400만원 낮음." }
     ]
   },
-  "verification_notes": [               // 🟡/🔴 규칙이 판정에 관여했을 때 경고
+  "action_items": [                     // 사용자가 채우면 판정이 바뀌거나 정확해지는 항목(D)
+    "가구 월평균 소득을 입력하면 특별공급 자격과 소득요건을 판정합니다."
+  ],
+  "verification_notes": [               // 🟡/🔴 규칙이 판정에 관여했을 때 경고(정보성)
     "신혼부부 특공 배점은 원문 재확인 대상(§2.B.②)"
   ]
 }
 ```
+
+> **잠정 판정(provisional):** core만 채운 경우 `confidence:"provisional"`로 판정을 내되,
+> 소득 미입력 → 특별공급 미산정, 예치금 미입력 → 민영 예치금 '박탈'로 단정하지 않고 공공
+> 실현가능성을 `"미확정(예치금 미입력)"`으로 표기한다. 무엇을 채우면 정확해지는지는
+> `action_items`로 안내한다.
+>
+> **`recommend_housing` 추가 출력(민영 트랙):** 각 추천에 `observed_winning_score`
+> `{scope, basis:"해당지역 최저 당첨가점(LWET_SCORE)", observed_cutoff_avg, observed_cutoff_min,
+> user_score, gap, sample_notice_count, zero_cutoff_row_count, summary}`를 붙여 회원 가점을
+> 실측 커트라인과 대조한다. 당첨가점은 민영 가점제 전용이라 공공(국민) 트랙에는 붙이지 않는다.
 
 ---
 
@@ -330,13 +381,16 @@ def score_subscription(a):
 | 명세 요소 | 현행 코드 위치 | 상태 |
 |---|---|---|
 | 자산 상한·예치금표·소득표·규제지역·배점표·컷오프 | `config/eligibility_rules.yaml` | ✅ 채워짐. 소득표는 LH 2025년도 적용분(`urban_worker_monthly_income_krw`, 원 단위). 매년 갱신 필요 |
-| 입력 스키마(§1) | `models.py` `ProfileDocument` | ✅ 구현. 모든 필드 선택 입력 + 필수/선택 누락 시 질문 목록(`missing_fields`) 반환 |
+| 입력 스키마(§1) | `models.py` `ProfileDocument` | ✅ 구현. 모든 필드 선택 입력. `missing_fields`가 (core, full, optional) 3계층으로 누락 질문 반환. `birth_date`→`age`·`homeless_duration_months` 대체 충족(`_SATISFYING_ALTERNATIVES`) |
+| 잠정 판정 + 안내(C·D) | `engine.py` `analyze` (`confidence`·`headline`·`action_items`) | ✅ 구현. core만 차면 provisional 판정, 소득 미입력→특공 미산정·예치금 미입력→'미확정'으로 표기하고 `action_items`로 채우라고 안내 |
+| 생년월일 기반 산정(B) | `engine.py` `_age_from_birth_date`·`_derive_homeless_months` | ✅ 구현. 생년월일로 만 나이·무주택 인정기간(만 30세/혼인일 기산, `homeless_since_date` 보정)을 정확 계산해 '만 나이 근사' 경고 제거 |
+| 실측 당첨가점 대조(A) | `tools/competition.py` `get_winning_scores` + `tools/recommend.py` `_aggregate_comparable_scores` | ✅ 구현. 민영 트랙 추천에 같은 시군구 마감 공고의 해당지역 최저 당첨가점(`LWET_SCORE`)을 회원 가점과 대조(`observed_winning_score`) |
 | 세션 프로필 저장 | `store.py` `ProfileStore` | ✅ 구현. 인메모리 문서 스토어(세션ID 키, deep merge, TTL 24h, LRU). [ADR-003](architecture-decisions.md#adr-003) |
-| Hard Filter(§3 Filter-01/02/03) | `engine.py` `analyze` | ✅ 구현. 유주택자의 민영 일반공급 허용(§3 주의사항), 자산 컷은 60㎡ 이하에만 적용 |
+| Hard Filter(§3 Filter-01/02/03) | `engine.py` `analyze` | ✅ 구현. 무주택 판정은 세대 단위(`homeless_household_member`: `owned_house_count` 기반 + 만 60세 이상 직계존속 제53조 예외), 유주택자의 민영 일반공급 허용(§3 주의사항, 규제지역 제외), 자산 컷은 60㎡ 이하에만 적용 |
 | 규제지역 세대주·2주택·재당첨 요건 | `engine.py` `is_regulated_region` + yaml `regulated_regions` | ✅ 구현. 서울 전역+경기 15곳(2026-07-01 추가) **동적 목록**. 2주택 세대·배우자 혼인전 당첨 1순위 배제 포함 |
 | 가점 산식(§3.B ①②③) | `scoring.py` | ✅ 구현. 84점 만점, 배우자 통장 합산 17점 상한 포함 |
 | 특공 배점(§2.B ①②③) + 소득 게이트 | `scoring.py` + `engine.py` + yaml 배점 테이블 | ✅ 구현. 신생아 소득트랙 70/20/10 + 경쟁 10점 배점, 신혼 일반형 별표6 순위제+13점, 다자녀 100점(통장 10년↑ 5점 단일). 특공별 소득 상한(외벌이/맞벌이) 게이트 |
-| 목표지역 컷오프·강제매칭(§6) | `engine.py` (예상치) + `tools/recommend.py` (실측 보정) | ✅ 구현. `get_competition_stats`의 과거 당첨가점이 있으면 컷오프를 실측으로 교체 |
+| 목표지역 컷오프·강제매칭(§6) | `engine.py` (참고 기준선, `cutoff_basis`) + `tools/recommend.py` (유사 과거 경쟁률·당첨가점) | ✅ 구현. `analyze`는 정적 밴드를 내부 기준선으로만 쓰고 예측 아님을 명시. `recommend_housing`은 확률 추정 대신 같은 시군구·트랙 마감 공고의 실제 경쟁률(+민영은 해당지역 최저 당첨가점)로 실적 제시 |
 | 공고별 면적/특공유형 반영 | `tools/recommend.py` `_notice_track` | ✅ 해소. 공고의 국민/민영 구분(HOUSE_DTL_SECD_NM)별로 자격 없는 트랙을 걸러냄 |
 | MCP 도구 노출 | `tools/notices.py`·`competition.py`·`lh_lease.py`·`profile.py`·`analyze.py`·`recommend.py`, `server.py` | ✅ 10개 도구 (청약홈 3 + LH 3 + 프로필·판정·추천 4, PlayMCP 권장 3~10개 상한) |
 

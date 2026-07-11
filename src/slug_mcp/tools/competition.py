@@ -39,3 +39,17 @@ async def get_competition_rates(house_manage_no: str) -> list[dict]:
     cond: dict[str, str | int] = {"cond[HOUSE_MANAGE_NO::EQ]": house_manage_no, "perPage": 50}
     result = await odcloud.get("ApplyhomeInfoCmpetRtSvc", "getAPTLttotPblancCmpet", **cond)
     return result.get("data", [])
+
+
+async def get_winning_scores(house_manage_no: str) -> list[dict]:
+    """공고의 주택형별 당첨가점 행만 조회한다 (최저 LWET_SCORE·평균 AVRG_SCORE·최고 TOP_SCORE).
+
+    민영 가점제 당첨 커트라인(최저 당첨가점)을 유사 과거 공고에서 확인할 때 쓰는 1콜 헬퍼.
+    값은 문자열 가점(0~84)이고, '-'는 미집계, '0'은 미달·추첨(가점경쟁 없음)을 뜻한다.
+
+    Args:
+        house_manage_no: 공고의 주택관리번호
+    """
+    cond: dict[str, str | int] = {"cond[HOUSE_MANAGE_NO::EQ]": house_manage_no, "perPage": 50}
+    result = await odcloud.get("ApplyhomeInfoCmpetRtSvc", "getAptLttotPblancScore", **cond)
+    return result.get("data", [])
