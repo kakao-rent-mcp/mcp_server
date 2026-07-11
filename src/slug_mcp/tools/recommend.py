@@ -204,6 +204,88 @@ def _build_comparable(
     return {"scope": scope, "avg_competition_rate": None, "reason": reason}
 
 
+def _winning_score_value(row: dict) -> float | None:
+    """당첨가점 행에서 최저 당첨가점(LWET_SCORE)을 뽑는다. '-'/빈값은 None, 숫자는 float.
+
+    '0'은 미달·추첨(가점 경쟁 없음)이라 0.0으로 반영한다(경쟁률의 미달 처리와 같은 철학).
+    """
+    raw = str(row.get("LWET_SCORE", "")).strip()
+    if not raw or raw == "-":
+        return None
+    try:
+        return float(raw)
+    except ValueError:
+        return None
+
+
+def _aggregate_comparable_scores(rows_by_notice: list[list[dict]]) -> dict[str, Any] | None:
+    """비교군 공고들의 해당지역 최저 당첨가점을 집계한다. 표본이 없으면 None.
+
+    당첨가점 응답에는 순위 컬럼이 없다(이미 최종 당첨 결과라 순위 구분 불필요) — 거주구분만 본다.
+    """
+    values: list[float] = []
+    zero_cutoff = 0
+    contributing_notices = 0
+    for rows in rows_by_notice:
+        note_values: list[float] = []
+        for row in rows:
+            if "해당지역" not in str(row.get("RESIDE_SENM", "")):
+                continue
+            value = _winning_score_value(row)
+            if value is None:
+                continue
+            note_values.append(value)
+            if value == 0.0:
+                zero_cutoff += 1
+        if note_values:
+            contributing_notices += 1
+            values.extend(note_values)
+    if not values:
+        return None
+    return {
+        "observed_cutoff_avg": round(sum(values) / len(values), 1),
+        "observed_cutoff_min": min(values),
+        "sample_notice_count": contributing_notices,
+        "zero_cutoff_row_count": zero_cutoff,
+    }
+
+
+def _build_winning_score(
+    scope: str, aggregate: dict[str, Any] | None, has_comparable: bool, user_score: int
+) -> dict[str, Any]:
+    """민영 추천에 붙일 유사 과거 '당첨 최저가점' 블록. 사용자 가점과 직접 대조한다."""
+    if aggregate is None:
+        reason = (
+            f"{scope}의 마감 공고에 당첨가점 자료가 없어 비교할 커트라인이 없습니다"
+            "(추첨제 물량이거나 가점 미집계일 수 있습니다)."
+            if has_comparable
+            else f"{scope}의 마감 공고 이력이 없어 비교할 당첨가점이 없습니다."
+        )
+        return {"observed_cutoff_avg": None, "reason": reason}
+    avg = aggregate["observed_cutoff_avg"]
+    gap = user_score - round(avg)
+    verdict = (
+        f"회원님 가점 {user_score}점이 관측 커트라인 평균 이상입니다(+{gap}점)."
+        if gap >= 0
+        else f"회원님 가점 {user_score}점이 관측 커트라인 평균보다 {-gap}점 낮습니다."
+    )
+    zero = aggregate["zero_cutoff_row_count"]
+    summary = (
+        f"{scope} 해당지역 최근 당첨 최저가점 평균 {avg}점, 최저 "
+        f"{aggregate['observed_cutoff_min']:.0f}점 (표본 {aggregate['sample_notice_count']}개 공고"
+        + (f", 미달·추첨 {zero}건)" if zero else ")")
+        + f". {verdict}"
+    )
+    return {
+        "scope": scope,
+        "basis": "해당지역 최저 당첨가점(LWET_SCORE)",
+        "user_score": user_score,
+        "gap": gap,
+        "summary": summary,
+        **aggregate,
+    }
+
+
 async def recommend_housing(
     session_id: str,
     house_category: HouseCategory = HouseCategory.APT,
@@ -317,41 +399,70 @@ async def recommend_housing(
     ]
     unique_hmns = list(dict.fromkeys(h for key in fetch_keys for h in comparable_index[key]))
 
+    # 당첨가점(가점제)은 민영 트랙에만 의미가 있다(공공은 납입총액 순차제) — 민영 키만 조회.
+    private_fetch_keys = [k for k in fetch_keys if k[1] == "private"]
+    private_hmns = list(
+        dict.fromkeys(h for key in private_fetch_keys for h in comparable_index[key])
+    )
+
     semaphore = asyncio.Semaphore(5)
 
     async def _rates(house_manage_no: str) -> list[dict]:
         async with semaphore:
             return await competition_tools.get_competition_rates(house_manage_no)
 
-    # 비교군 경쟁률은 보조 데이터라, 일부 조회가 실패해도 나머지로 계속 진행한다
+    async def _scores(house_manage_no: str) -> list[dict]:
+        async with semaphore:
+            return await competition_tools.get_winning_scores(house_manage_no)
+
+    # 비교군 경쟁률·당첨가점은 보조 데이터라, 일부 조회가 실패해도 나머지로 계속 진행한다
     # (한 콜의 일시 오류가 추천 전체를 무너뜨리지 않게 한다).
-    rate_rows = await asyncio.gather(*(_rates(h) for h in unique_hmns), return_exceptions=True)
+    rate_rows, score_rows = await asyncio.gather(
+        asyncio.gather(*(_rates(h) for h in unique_hmns), return_exceptions=True),
+        asyncio.gather(*(_scores(h) for h in private_hmns), return_exceptions=True),
+    )
     rows_by_hmn = {
         h: (rows if not isinstance(rows, BaseException) else [])
         for h, rows in zip(unique_hmns, rate_rows, strict=True)
+    }
+    score_by_hmn = {
+        h: (rows if not isinstance(rows, BaseException) else [])
+        for h, rows in zip(private_hmns, score_rows, strict=True)
     }
     failed_rate_fetches = sum(1 for rows in rate_rows if isinstance(rows, BaseException))
     aggregates = {
         key: _aggregate_comparable_rates([rows_by_hmn[h] for h in comparable_index[key]])
         for key in fetch_keys
     }
+    score_aggregates = {
+        key: _aggregate_comparable_scores([score_by_hmn[h] for h in comparable_index[key]])
+        for key in private_fetch_keys
+    }
+    user_score: int = scores["private_general_score"]
 
-    # 4) 추천 조립 — 확률 라벨 대신 유사 과거 경쟁률을 붙인다. 없으면 명시.
+    # 4) 추천 조립 — 확률 라벨 대신 유사 과거 경쟁률(+민영은 당첨 최저가점)을 붙인다.
     recommendations: list[dict[str, Any]] = []
     for (notice, track), key in zip(candidates, candidate_keys, strict=True):
         aggregate = aggregates.get(key) if key is not None else None
         has_comparable = key is not None and key in comparable_index
         regulated = engine.is_regulated_region(notice.get("HSSPLY_ADRES") or region)
-        recommendations.append(
-            {
-                "notice": notice,
-                "track": track,
-                "application_status": _application_status(notice, today),
-                "regulated_region": regulated,
-                "supply_households": _int_or_none(notice.get("TOT_SUPLY_HSHLDCO")),
-                "comparable_competition": _build_comparable(key, track, has_comparable, aggregate),
-            }
-        )
+        rec: dict[str, Any] = {
+            "notice": notice,
+            "track": track,
+            "application_status": _application_status(notice, today),
+            "regulated_region": regulated,
+            "supply_households": _int_or_none(notice.get("TOT_SUPLY_HSHLDCO")),
+            "comparable_competition": _build_comparable(key, track, has_comparable, aggregate),
+        }
+        if track == "private":
+            scope = f"{key[0]}·민영" if key is not None else "민영"
+            rec["observed_winning_score"] = _build_winning_score(
+                scope,
+                score_aggregates.get(key) if key is not None else None,
+                has_comparable,
+                user_score,
+            )
+        recommendations.append(rec)
 
     # 경쟁률 낮은(=당첨 쉬운) 순, 비교자료 없는 공고는 뒤로, 동률이면 공급세대 많은 순.
     def _rank_key(rec: dict[str, Any]) -> tuple[float, int]:
@@ -377,9 +488,17 @@ async def recommend_housing(
         "유사 과거 경쟁률은 같은 시군구·트랙의 마감된 공고 실적이며, 이 공고 자체의 "
         "결과가 아닙니다. 실제 경쟁률은 공급물량·분양가·시황에 따라 달라집니다."
     )
+    if private_fetch_keys:
+        notes.append(
+            "민영 추천의 observed_winning_score는 같은 시군구 마감 공고의 해당지역 최저 당첨가점"
+            "(관측값)을 회원님 가점과 대조한 것으로, 가점제 물량에만 해당합니다. 추첨 물량·분양가·"
+            "시황에 따라 실제 커트라인은 달라집니다."
+        )
 
     return {
         "status": "ok",
+        "confidence": analysis.get("confidence", "complete"),
+        "headline": analysis.get("headline"),
         "total_candidates_scanned": len(scanned),
         "skipped_ineligible_count": skipped,
         "comparable_pool_notices": sum(len(v) for v in comparable_index.values()),
@@ -393,5 +512,6 @@ async def recommend_housing(
             "recommended_tracks": matching["recommended_tracks"],
         },
         "recommendations": recommendations[:top_n],
+        "action_items": analysis.get("action_items", []),
         "verification_notes": notes,
     }

@@ -52,9 +52,19 @@
 
 룰 엔진은 자연어를 파싱하지 않는다. MCP 클라이언트(LLM)가 아래 구조로 정규화해 넘긴다.
 필드명은 구현부(`models.py`의 `ProfileDocument`)와 1:1 매핑된다. 구현에서는 모든 필드가
-선택 입력이며, 대화 몇 번에 걸쳐 `update_my_profile`로 조각조각 채워진다 — 필수 항목이
-비면 엔진이 "물어볼 질문 목록"을 돌려준다. 다자녀 세대구성 가점용
-`is_three_generation_household`/`is_single_parent` 두 필드는 구현에서 추가되었다.
+선택 입력이며, 대화 몇 번에 걸쳐 `update_my_profile`로 조각조각 채워진다.
+
+**필드 계층(구현):** `models.py`는 필수 항목을 두 단계로 나눈다 — `CORE_FIELD_QUESTIONS`(나이·
+거주지·주택수·목표지역·통장 가입기간)가 모두 차면 **잠정 판정**(`confidence:"provisional"`)이
+가능하고, `FULL_FIELD_QUESTIONS`(무주택기간·혼인·부양가족·월소득·예치금)까지 채우면 **정밀
+판정**이 된다. core가 비면 엔진이 "물어볼 질문 목록"(needs_more_info)을 돌려주고, full이 비면
+판정은 수행하되 해당 트랙 점수를 '미확정'으로 표시하고 `action_items`로 채우라고 안내한다.
+
+**대체 충족:** `birth_date`(생년월일)는 `age`와 `homeless_duration_months`를 대신한다
+(`_SATISFYING_ALTERNATIVES`) — 생년월일이 있으면 엔진이 만 나이와 무주택 인정기간(만 30세
+기산, 30세 전 혼인 시 혼인신고일, 처분 이력은 `homeless_since_date`)을 정확히 계산한다.
+다자녀 세대구성 가점용 `is_three_generation_household`/`is_single_parent` 두 필드는 구현에서
+추가되었다.
 
 ```jsonc
 {
@@ -65,10 +75,12 @@
   },
   "user_profile": {
     "age": 34,
+    "birth_date": "1991-05-02",            // 생년월일(YYYY-MM-DD). 있으면 age·무주택기간을 정확 계산
     "is_head_of_household": true,          // 세대주 여부
     "residence_area": "서울",              // 주민등록 거주 시·도
     "residence_years_in_region": 4,        // 해당 시·도 연속 거주 연수
-    "homeless_duration_months": 36,        // 본인 무주택 기간(월, 가점용)
+    "homeless_duration_months": 36,        // 본인 무주택 기간(월, 가점용). birth_date 있으면 자동 계산
+    "homeless_since_date": null,           // 주택 처분 후 무주택이 된 날(YYYY-MM-DD). 기산 보정용
     "owned_house_count": 0,                // 세대 보유 주택 수. 0=무주택세대
     "owns_home_self": false,               // 보유 주택 소유자가 본인·배우자인지(제53조 예외 배제용)
     "home_owner_is_ascendant_60plus": null,// 소유자가 만 60세 이상 직계존속인지(제53조 무주택 간주)
@@ -277,8 +289,9 @@ def score_subscription(a):
 > `analyze`는 이 정적 밴드를 **내부 판정 기준선**으로만 쓰고, 출력에
 > `cutoff_basis: "planning_estimate"`를 붙여 예측이 아님을 명시한다(추천 트랙 사유도 "참고
 > 기준선(관측값 아님)"으로 표기). **실제 과거 실적**은 `recommend_housing`이 같은 시군구·트랙의
-> 마감 공고 **경쟁률**로 제시한다(확률 추정 대신 실측). ⚠️ 이 정적 밴드를 걷어내면
-> 실현가능성·가점제/추첨제 분기·대안지역·강제매칭이 모두 근거를 잃으므로 제거하지 말고
+> 마감 공고 **경쟁률**과, 민영 트랙은 추가로 **해당지역 최저 당첨가점(`LWET_SCORE`, 관측값)**을
+> 회원 가점과 대조해 제시한다(`observed_winning_score`, 확률 추정 대신 실측). ⚠️ 이 정적 밴드를
+> 걷어내면 실현가능성·가점제/추첨제 분기·대안지역·강제매칭이 모두 근거를 잃으므로 제거하지 말고
 > **라벨만 격하**한다.
 
 ### A. 지역 등급별 참고 컷오프 기준선 (2026 계획 추정치, 관측값 아님)
@@ -307,6 +320,9 @@ def score_subscription(a):
 
 ```jsonc
 {
+  "status": "ok",                        // ok | needs_more_info | session_not_found
+  "confidence": "provisional",           // provisional(core만) | complete(full까지). needs_more_info면 없음
+  "headline": "[잠정 판정] 가장 유망한 트랙은 '...'입니다. 추가 정보를 입력하면 판정이 더 정확해집니다.",
   "eligibility_status": {
     "is_eligible_for_public": true,
     "is_eligible_for_private": true,
@@ -339,11 +355,24 @@ def score_subscription(a):
         "reason": "당첨 저축총액선이 서울 대비 약 400만원 낮음." }
     ]
   },
-  "verification_notes": [               // 🟡/🔴 규칙이 판정에 관여했을 때 경고
+  "action_items": [                     // 사용자가 채우면 판정이 바뀌거나 정확해지는 항목(D)
+    "가구 월평균 소득을 입력하면 특별공급 자격과 소득요건을 판정합니다."
+  ],
+  "verification_notes": [               // 🟡/🔴 규칙이 판정에 관여했을 때 경고(정보성)
     "신혼부부 특공 배점은 원문 재확인 대상(§2.B.②)"
   ]
 }
 ```
+
+> **잠정 판정(provisional):** core만 채운 경우 `confidence:"provisional"`로 판정을 내되,
+> 소득 미입력 → 특별공급 미산정, 예치금 미입력 → 민영 예치금 '박탈'로 단정하지 않고 공공
+> 실현가능성을 `"미확정(예치금 미입력)"`으로 표기한다. 무엇을 채우면 정확해지는지는
+> `action_items`로 안내한다.
+>
+> **`recommend_housing` 추가 출력(민영 트랙):** 각 추천에 `observed_winning_score`
+> `{scope, basis:"해당지역 최저 당첨가점(LWET_SCORE)", observed_cutoff_avg, observed_cutoff_min,
+> user_score, gap, sample_notice_count, zero_cutoff_row_count, summary}`를 붙여 회원 가점을
+> 실측 커트라인과 대조한다. 당첨가점은 민영 가점제 전용이라 공공(국민) 트랙에는 붙이지 않는다.
 
 ---
 
@@ -352,13 +381,16 @@ def score_subscription(a):
 | 명세 요소 | 현행 코드 위치 | 상태 |
 |---|---|---|
 | 자산 상한·예치금표·소득표·규제지역·배점표·컷오프 | `config/eligibility_rules.yaml` | ✅ 채워짐. 소득표는 LH 2025년도 적용분(`urban_worker_monthly_income_krw`, 원 단위). 매년 갱신 필요 |
-| 입력 스키마(§1) | `models.py` `ProfileDocument` | ✅ 구현. 모든 필드 선택 입력 + 필수/선택 누락 시 질문 목록(`missing_fields`) 반환 |
+| 입력 스키마(§1) | `models.py` `ProfileDocument` | ✅ 구현. 모든 필드 선택 입력. `missing_fields`가 (core, full, optional) 3계층으로 누락 질문 반환. `birth_date`→`age`·`homeless_duration_months` 대체 충족(`_SATISFYING_ALTERNATIVES`) |
+| 잠정 판정 + 안내(C·D) | `engine.py` `analyze` (`confidence`·`headline`·`action_items`) | ✅ 구현. core만 차면 provisional 판정, 소득 미입력→특공 미산정·예치금 미입력→'미확정'으로 표기하고 `action_items`로 채우라고 안내 |
+| 생년월일 기반 산정(B) | `engine.py` `_age_from_birth_date`·`_derive_homeless_months` | ✅ 구현. 생년월일로 만 나이·무주택 인정기간(만 30세/혼인일 기산, `homeless_since_date` 보정)을 정확 계산해 '만 나이 근사' 경고 제거 |
+| 실측 당첨가점 대조(A) | `tools/competition.py` `get_winning_scores` + `tools/recommend.py` `_aggregate_comparable_scores` | ✅ 구현. 민영 트랙 추천에 같은 시군구 마감 공고의 해당지역 최저 당첨가점(`LWET_SCORE`)을 회원 가점과 대조(`observed_winning_score`) |
 | 세션 프로필 저장 | `store.py` `ProfileStore` | ✅ 구현. 인메모리 문서 스토어(세션ID 키, deep merge, TTL 24h, LRU). [ADR-003](architecture-decisions.md#adr-003) |
 | Hard Filter(§3 Filter-01/02/03) | `engine.py` `analyze` | ✅ 구현. 무주택 판정은 세대 단위(`homeless_household_member`: `owned_house_count` 기반 + 만 60세 이상 직계존속 제53조 예외), 유주택자의 민영 일반공급 허용(§3 주의사항, 규제지역 제외), 자산 컷은 60㎡ 이하에만 적용 |
 | 규제지역 세대주·2주택·재당첨 요건 | `engine.py` `is_regulated_region` + yaml `regulated_regions` | ✅ 구현. 서울 전역+경기 15곳(2026-07-01 추가) **동적 목록**. 2주택 세대·배우자 혼인전 당첨 1순위 배제 포함 |
 | 가점 산식(§3.B ①②③) | `scoring.py` | ✅ 구현. 84점 만점, 배우자 통장 합산 17점 상한 포함 |
 | 특공 배점(§2.B ①②③) + 소득 게이트 | `scoring.py` + `engine.py` + yaml 배점 테이블 | ✅ 구현. 신생아 소득트랙 70/20/10 + 경쟁 10점 배점, 신혼 일반형 별표6 순위제+13점, 다자녀 100점(통장 10년↑ 5점 단일). 특공별 소득 상한(외벌이/맞벌이) 게이트 |
-| 목표지역 컷오프·강제매칭(§6) | `engine.py` (참고 기준선, `cutoff_basis`) + `tools/recommend.py` (유사 과거 경쟁률) | ✅ 구현. `analyze`는 정적 밴드를 내부 기준선으로만 쓰고 예측 아님을 명시. `recommend_housing`은 확률 추정 대신 같은 시군구·트랙 마감 공고의 실제 경쟁률로 실적 제시 |
+| 목표지역 컷오프·강제매칭(§6) | `engine.py` (참고 기준선, `cutoff_basis`) + `tools/recommend.py` (유사 과거 경쟁률·당첨가점) | ✅ 구현. `analyze`는 정적 밴드를 내부 기준선으로만 쓰고 예측 아님을 명시. `recommend_housing`은 확률 추정 대신 같은 시군구·트랙 마감 공고의 실제 경쟁률(+민영은 해당지역 최저 당첨가점)로 실적 제시 |
 | 공고별 면적/특공유형 반영 | `tools/recommend.py` `_notice_track` | ✅ 해소. 공고의 국민/민영 구분(HOUSE_DTL_SECD_NM)별로 자격 없는 트랙을 걸러냄 |
 | MCP 도구 노출 | `tools/notices.py`·`competition.py`·`lh_lease.py`·`profile.py`·`analyze.py`·`recommend.py`, `server.py` | ✅ 10개 도구 (청약홈 3 + LH 3 + 프로필·판정·추천 4, PlayMCP 권장 3~10개 상한) |
 

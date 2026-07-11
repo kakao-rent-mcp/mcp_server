@@ -25,6 +25,7 @@ FIXTURES = Path(__file__).parent / "fixtures"
 
 _SEARCH_URL = "https://api.odcloud.kr/api/ApplyhomeInfoDetailSvc/v1/getAPTLttotPblancDetail"
 _CMPET_URL = "https://api.odcloud.kr/api/ApplyhomeInfoCmpetRtSvc/v1/getAPTLttotPblancCmpet"
+_SCORE_URL = "https://api.odcloud.kr/api/ApplyhomeInfoCmpetRtSvc/v1/getAptLttotPblancScore"
 
 # 고정된 '오늘'(2026-07-08) 기준
 _FUTURE = ("2026-07-20", "2026-07-29")  # 접수전
@@ -131,6 +132,22 @@ def _cmpet_response(*rates: str) -> dict:
                 "CMPET_RATE": rate,
             }
             for rate in rates
+        ]
+    }
+
+
+def _score_response(*lwet_scores: str, reside: str = "해당지역") -> dict:
+    """주택형별 당첨가점(최저 LWET_SCORE) 행들로 구성된 당첨가점 응답을 만든다."""
+    return {
+        "data": [
+            {
+                "HOUSE_TY": "084.0000A",
+                "RESIDE_SENM": reside,
+                "LWET_SCORE": lwet,
+                "AVRG_SCORE": lwet,
+                "TOP_SCORE": lwet,
+            }
+            for lwet in lwet_scores
         ]
     }
 
@@ -335,6 +352,70 @@ async def test_recommend_excludes_closed_notice():
     assert result["recommendations"] == []
     assert result["total_candidates_scanned"] == 0
     assert result["comparable_pool_notices"] == 1
+
+
+@respx.mock
+async def test_recommend_attaches_observed_winning_score_for_private():
+    """민영 추천에 같은 시군구 마감 공고의 해당지역 최저 당첨가점이 붙고 사용자 가점과 대조된다."""
+    respx.get(_SEARCH_URL).mock(
+        return_value=httpx.Response(
+            200,
+            json=_search_response(
+                _notice("OPEN1", begin=_FUTURE[0], end=_FUTURE[1], track="민영", name="민영 신규"),
+                _notice("PAST1", begin=_PAST[0], end=_PAST[1], track="민영", name="민영 과거"),
+            ),
+        )
+    )
+    respx.get(_CMPET_URL).mock(return_value=httpx.Response(200, json=_cmpet_response("5.0")))
+    # 해당지역 최저가점 60·50, 기타지역 72(집계 제외) → 해당지역 평균 55, 최저 50
+    respx.get(_SCORE_URL).mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "data": [
+                    *_score_response("60", "50")["data"],
+                    *_score_response("72", reside="기타지역")["data"],
+                ]
+            },
+        )
+    )
+    session_id, _ = store_module.default_store.upsert(None, _complete_patch())
+
+    result = await recommend.recommend_housing(session_id, max_candidates_to_scan=5, top_n=3)
+
+    assert result["status"] == "ok"
+    rec = result["recommendations"][0]
+    assert rec["track"] == "private"
+    ws = rec["observed_winning_score"]
+    assert ws["observed_cutoff_avg"] == 55.0  # (60+50)/2, 기타지역 제외
+    assert ws["observed_cutoff_min"] == 50.0
+    assert ws["user_score"] == 43  # _complete_patch 민영 가점
+    assert ws["gap"] == 43 - 55  # 관측 커트라인보다 12점 낮음
+    assert "당첨 최저가점" in ws["summary"]
+
+
+@respx.mock
+async def test_recommend_public_notice_has_no_winning_score_call():
+    """공공(국민) 공고는 가점 개념이 없어 당첨가점을 조회하지 않는다(블록도 없음)."""
+    respx.get(_SEARCH_URL).mock(
+        return_value=httpx.Response(
+            200,
+            json=_search_response(
+                _notice("OPEN1", begin=_FUTURE[0], end=_FUTURE[1], track="국민"),
+                _notice("PAST1", begin=_PAST[0], end=_PAST[1], track="국민"),
+            ),
+        )
+    )
+    respx.get(_CMPET_URL).mock(return_value=httpx.Response(200, json=_cmpet_response("3.0")))
+    score_route = respx.get(_SCORE_URL).mock(
+        return_value=httpx.Response(200, json=_score_response())
+    )
+    session_id, _ = store_module.default_store.upsert(None, _complete_patch())
+
+    result = await recommend.recommend_housing(session_id, max_candidates_to_scan=5)
+
+    assert "observed_winning_score" not in result["recommendations"][0]
+    assert not score_route.called  # 민영 키가 없으면 당첨가점 API를 부르지 않는다
 
 
 @respx.mock

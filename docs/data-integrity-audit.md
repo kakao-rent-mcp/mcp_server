@@ -585,7 +585,8 @@
 | 지역 등급(S/A/B/C)과 컷오프 기준선 표 | yaml `expected_cutoffs`, `region_grade_keywords` | 2026 계획 추정치(참고 기준선). `analyze`가 `cutoff_basis:"planning_estimate"`로 예측 아님을 명시(관측값 아님) |
 | 실현가능성 등급(추정) | engine `private_feasibility_pct`·`feasibility_label` | 스펙 §6 자체 정의 밴드. 확률(%)이 아니라 '(추정)' 라벨로 표기 |
 | 대안 지역 제안 | yaml `alternative_regions` | 강제매칭 Case 4 안내 문구 |
-| 과거 실적 제시 | recommend `_aggregate_comparable_rates` — 같은 시군구·트랙 마감 공고의 1순위 해당지역 경쟁률 평균 | 예측 대신 실측 경쟁률(당첨가점 아님) |
+| 과거 실적 제시(경쟁률) | recommend `_aggregate_comparable_rates` — 같은 시군구·트랙 마감 공고의 1순위 해당지역 경쟁률 평균 | 예측 대신 실측 경쟁률 |
+| 과거 실적 제시(당첨가점) | recommend `_aggregate_comparable_scores` — 같은 시군구 마감 공고의 해당지역 최저 당첨가점(`LWET_SCORE`) 평균·최저, 회원 가점과 대조 | 예측 대신 실측 커트라인(민영 가점제 전용). '0'은 미달·추첨으로 반영 |
 
 **기타 관찰 (오류라기보다 모델 단순화 — 참고):**
 

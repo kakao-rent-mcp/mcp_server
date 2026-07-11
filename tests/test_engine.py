@@ -90,8 +90,13 @@ def _complete_doc(**paths: object) -> dict:
 def test_incomplete_profile_returns_needs_more_info():
     result = engine.analyze({"user_profile": {"age": 34}}, as_of=AS_OF)
     assert result["status"] == "needs_more_info"
+    # core(잠정 판정에 필수) 누락은 needs_more_info를 낸다. 예치금은 이제 full(권장)이다.
     fields = [item["field"] for item in result["missing_required_fields"]]
-    assert "subscription_account.total_balance_krw" in fields
+    assert "subscription_account.duration_months" in fields
+    assert "target_housing.target_region" in fields
+    assert "subscription_account.total_balance_krw" not in fields  # full로 이동
+    recommended = [item["field"] for item in result["missing_recommended_fields"]]
+    assert "subscription_account.total_balance_krw" in recommended
     assert all(item["question"] for item in result["missing_required_fields"])
 
 
@@ -542,3 +547,104 @@ def test_private_rank1_requires_subscription_duration():
     status = result["eligibility_status"]
     assert status["is_eligible_for_private_rank1"] is False
     assert any("가입" in r["reason"] for r in status["disqualification_reasons"])
+
+
+# --- B: 생년월일 기반 나이·무주택기간 산정 -----------------------------------
+
+
+def test_birth_date_derives_age_and_homeless_period():
+    """생년월일만 주면 age·무주택기간을 계산하고, '만 나이 근사' 경고가 사라진다."""
+    doc = _complete_doc(**{"user_profile.birth_date": "1996-03-10"})
+    del doc["user_profile"]["age"]
+    del doc["user_profile"]["homeless_duration_months"]
+    result = engine.analyze(doc, as_of=AS_OF)
+    assert result["status"] == "ok"
+    assert result["confidence"] == "complete"  # 나머지 full 필드는 모두 존재
+    # 만 30세=2026-03-10, 혼인 2021-03-10(30세 전) 기산 → 64개월=5년 → 무주택 12점
+    assert result["scores"]["private_score_breakdown"]["homeless_period"] == 12
+    assert not any("만 나이 기준 근사" in n for n in result["verification_notes"])
+    assert any("생년월일" in n for n in result["verification_notes"])
+
+
+def test_homeless_since_date_limits_homeless_period():
+    """주택 처분 이력(무주택 시작일)이 만 30세보다 늦으면 그날부터 무주택기간을 센다."""
+    doc = _complete_doc(
+        **{
+            "user_profile.birth_date": "1990-01-01",  # 만 30세=2020-01-01
+            "user_profile.homeless_since_date": "2025-01-05",  # 처분 후 무주택
+            "user_profile.marriage.is_married": False,
+            "user_profile.marriage.marriage_date": None,
+        }
+    )
+    del doc["user_profile"]["age"]
+    del doc["user_profile"]["homeless_duration_months"]
+    result = engine.analyze(doc, as_of=AS_OF)
+    # 2025-01 ~ 2026-07 = 18개월 = 1년 → 무주택 가점 4점(1*2+2)
+    assert result["scores"]["private_score_breakdown"]["homeless_period"] == 4
+
+
+# --- C: 단계적 잠정 판정(core만으로 판정, full 미입력은 미확정) ---------------
+
+
+def _core_only_doc(**paths: object) -> dict:
+    """core 필드만 채운 최소 프로필(비규제지역 부산). paths로 오버라이드."""
+    doc: dict = {
+        "target_housing": {"target_region": "부산"},
+        "user_profile": {"age": 34, "residence_area": "부산", "owned_house_count": 0},
+        "subscription_account": {"duration_months": 24, "payment_count": 24},
+    }
+    for path, value in paths.items():
+        node = doc
+        parts = path.split(".")
+        for part in parts[:-1]:
+            node = node.setdefault(part, {})
+        node[parts[-1]] = value
+    return doc
+
+
+def test_core_only_profile_returns_provisional_verdict():
+    """core만 채우면 needs_more_info가 아니라 '잠정 판정'을 돌려준다."""
+    result = engine.analyze(_core_only_doc(), as_of=AS_OF)
+    assert result["status"] == "ok"
+    assert result["confidence"] == "provisional"
+    assert result["headline"].startswith("[잠정 판정]")
+    assert result["action_items"], "잠정 판정은 채우라는 안내를 함께 준다"
+
+
+def test_missing_income_skips_special_supply_with_action_item():
+    """소득 미입력이면 특별공급을 0%소득으로 잘못 통과시키지 않고 미산정한다."""
+    doc = _complete_doc()
+    del doc["user_profile"]["income_and_assets"]["monthly_income_krw"]
+    result = engine.analyze(doc, as_of=AS_OF)
+    assert result["confidence"] == "provisional"
+    scores = result["scores"]["special_supply_scores"]
+    assert scores["newborn"] is None
+    assert scores["newlywed"] is None
+    assert scores["multi_child"] is None
+    assert any("소득" in a for a in result["action_items"])
+
+
+def test_missing_balance_is_provisional_not_disqualified():
+    """예치금 미입력을 민영 1순위 '박탈'로 단정하지 않고, 공공 실현가능성을 미확정으로 둔다."""
+    doc = _complete_doc(
+        **{"user_profile.residence_area": "부산", "target_housing.target_region": "부산"}
+    )
+    del doc["subscription_account"]["total_balance_krw"]
+    result = engine.analyze(doc, as_of=AS_OF)
+    assert result["confidence"] == "provisional"
+    reasons = result["eligibility_status"]["disqualification_reasons"]
+    assert not any("민영 예치금" in r["filter"] for r in reasons)
+    # 부산 공공 1순위(6/6) 충족·통장 72개월·70회지만 예치금 미입력 → 공공 실현가능성 미확정
+    assert "미확정" in result["matching_analysis"]["feasibility_by_track"]["public_general"]
+    assert any("예치금" in a for a in result["action_items"])
+
+
+# --- D: headline + 완전 판정 confidence --------------------------------------
+
+
+def test_complete_profile_has_headline_and_complete_confidence():
+    result = engine.analyze(_complete_doc(), as_of=AS_OF)
+    assert result["confidence"] == "complete"
+    assert result["headline"]
+    assert not result["headline"].startswith("[잠정")
+    assert "action_items" in result

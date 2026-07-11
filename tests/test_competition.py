@@ -33,3 +33,17 @@ async def test_get_competition_stats():
     assert result["competition"][0]["CMPET_RATE"] == "3.79"
     assert result["special_supply"][0]["SPSPLY_HSHLDCO"] == 10
     assert result["winning_scores"] == []
+
+
+@respx.mock
+async def test_get_winning_scores():
+    """당첨가점 조회는 주택형별 최저·평균·최고 가점 행을 그대로 돌려준다."""
+    respx.get("https://api.odcloud.kr/api/ApplyhomeInfoCmpetRtSvc/v1/getAptLttotPblancScore").mock(
+        return_value=httpx.Response(200, json=_load_fixture("apt_lttot_pblanc_score.json"))
+    )
+
+    rows = await competition.get_winning_scores("2026000281")
+
+    assert len(rows) == 4
+    assert rows[0]["LWET_SCORE"] == "60"
+    assert rows[0]["RESIDE_SENM"] == "해당지역"

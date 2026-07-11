@@ -88,3 +88,31 @@ def test_get_my_profile_unknown_session_guides_user():
     result = profile_tools.get_my_profile("nope")
     assert result["found"] is False
     assert "update_my_profile" in result["guidance"]
+
+
+def test_ready_for_provisional_with_core_only():
+    """core 5항목만 채우면 잠정 판정 준비 완료(정밀 판정은 full까지 필요)."""
+    result = profile_tools.update_my_profile(
+        target_housing=TargetHousing(target_region="부산"),
+        user_profile=UserProfile(age=34, residence_area="부산", owned_house_count=0),
+        subscription_account=SubscriptionAccount(duration_months=24),
+    )
+    assert result["ready_for_provisional"] is True
+    assert result["ready_for_analysis"] is False  # 소득·예치금 등 full 미입력
+    recommended = [item["field"] for item in result["missing_recommended_fields"]]
+    assert "user_profile.income_and_assets.monthly_income_krw" in recommended
+    assert "subscription_account.total_balance_krw" in recommended
+
+
+def test_birth_date_satisfies_age_requirement():
+    """생년월일을 주면 age 미입력이어도 core가 충족된다(둘 중 하나면 됨)."""
+    result = profile_tools.update_my_profile(
+        target_housing=TargetHousing(target_region="부산"),
+        user_profile=UserProfile(
+            birth_date="1995-10-24", residence_area="부산", owned_house_count=0
+        ),
+        subscription_account=SubscriptionAccount(duration_months=24),
+    )
+    missing = [item["field"] for item in result["missing_required_fields"]]
+    assert "user_profile.age" not in missing
+    assert result["ready_for_provisional"] is True

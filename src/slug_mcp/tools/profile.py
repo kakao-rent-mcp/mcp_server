@@ -23,26 +23,43 @@ from ..models import (
 
 
 def _profile_status(session_id: str, doc: dict[str, Any]) -> dict[str, Any]:
-    required, optional = missing_fields(doc)
+    core, full, optional = missing_fields(doc)
     # 문서를 스키마에 통과시켜 기본값까지 채운 전체 모습을 돌려준다.
     full_profile = ProfileDocument.model_validate(doc).model_dump()
-    next_questions = [item["question"] for item in required[:3]]
-    if not required:
+    # 물어볼 순서: core(잠정 판정에 필수) → full(정밀 판정) → optional(정확도).
+    if core:
+        next_questions = [item["question"] for item in core[:3]]
+    elif full:
+        next_questions = [item["question"] for item in full[:3]]
+    else:
         next_questions = [item["question"] for item in optional[:2]]
+
+    if core:
+        guidance = (
+            "next_questions를 사용자에게 물어 답을 받은 뒤, 같은 session_id로 update_my_profile을 "
+            "다시 호출해 채워 넣으세요. core 항목이 다 차면 잠정 판정이 가능합니다."
+        )
+    elif full:
+        guidance = (
+            "잠정 판정은 지금도 가능합니다(analyze_my_subscription). next_questions까지 채우면 "
+            "예치금·소득·가점을 포함한 정밀 판정이 됩니다."
+        )
+    else:
+        guidance = (
+            "필수·권장 항목이 모두 채워졌습니다. analyze_my_subscription 또는 recommend_housing을 "
+            "이 session_id로 호출하세요."
+        )
     return {
         "session_id": session_id,
         "profile": full_profile,
-        "ready_for_analysis": not required,
-        "missing_required_fields": required,
+        # core+full이 모두 차야 정밀 판정 준비 완료. core만 차면 잠정 판정 가능.
+        "ready_for_analysis": not core and not full,
+        "ready_for_provisional": not core,
+        "missing_required_fields": core,
+        "missing_recommended_fields": full,
         "missing_optional_fields": optional,
         "next_questions": next_questions,
-        "guidance": (
-            "필수 항목이 모두 채워졌습니다. analyze_my_subscription 또는 recommend_housing을 "
-            "이 session_id로 호출하세요."
-            if not required
-            else "next_questions를 사용자에게 물어 답을 받은 뒤, 같은 session_id로 "
-            "update_my_profile을 다시 호출해 채워 넣으세요."
-        ),
+        "guidance": guidance,
     }
 
 

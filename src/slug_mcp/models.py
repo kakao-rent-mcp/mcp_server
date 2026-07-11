@@ -140,7 +140,15 @@ class SubscriptionAccount(BaseModel):
 class UserProfile(BaseModel):
     """자격판정과 가점계산에 쓰이는 사용자 정보."""
 
-    age: int | None = Field(default=None, ge=0, description="만 나이")
+    age: int | None = Field(
+        default=None, ge=0, description="만 나이. '30살'처럼 나이만 알려줘도 됨"
+    )
+    birth_date: str | None = Field(
+        default=None,
+        description="생년월일(YYYY-MM-DD). '951024'·'19951024'·'1995-10-24' 등 어떤 형식이든 "
+        "YYYY-MM-DD로 정규화해 넣으세요(2자리 연도는 현재 기준 만 19~99세 범위로 추정). 주면 만 "
+        "나이와 무주택기간(만 30세 기산)을 정확히 계산하고, 없으면 age로 근사합니다",
+    )
     is_head_of_household: bool | None = Field(
         default=None, description="세대주 여부. 규제지역 1순위 판정에 필요"
     )
@@ -151,7 +159,14 @@ class UserProfile(BaseModel):
         default=None, ge=0, description="해당 시·도 연속 거주 연수"
     )
     homeless_duration_months: int | None = Field(
-        default=None, ge=0, description="무주택 기간(개월). 유주택자는 0"
+        default=None,
+        ge=0,
+        description="무주택 기간(개월). 유주택자는 0. birth_date를 주면 자동 계산됨",
+    )
+    homeless_since_date: str | None = Field(
+        default=None,
+        description="무주택자가 된 날(YYYY-MM-DD). 과거 주택을 처분한 적이 있으면 처분 후 무주택이 "
+        "된 날. birth_date와 함께 주면 무주택기간을 '만 30세와 이 날짜 중 늦은 쪽'부터 계산합니다",
     )
     owned_house_count: int | None = Field(
         default=None,
@@ -196,17 +211,29 @@ class ProfileDocument(BaseModel):
     subscription_account: SubscriptionAccount = Field(default_factory=SubscriptionAccount)
 
 
-# 분석에 반드시 필요한 필드와, 비어 있을 때 클라이언트 AI가 사용자에게 던질 질문.
-# (필드 경로, 질문) — update_my_profile / analyze_my_subscription 이 참조한다.
-REQUIRED_FIELD_QUESTIONS: dict[str, str] = {
-    "user_profile.age": "만 나이가 어떻게 되세요?",
+# 필드 경로 → 클라이언트 AI가 사용자에게 던질 질문. update_my_profile / analyze 가 참조한다.
+#
+# core: 이 항목이 모두 차면 '잠정 판정'이 가능하다(무주택 여부·규제지역 자격 게이트·공공 1순위
+#       가입기간·지역 등급·만 나이). 하나라도 비면 판정을 미루고 물어본다.
+# full: core에 더해 이 항목까지 채우면 '정밀 판정'이 된다(예치금·소득·부양가족·혼인). 비어도
+#       판정은 수행하되, 해당 트랙 점수를 '미확정'으로 표시하고 채우라고 안내한다(action_items).
+CORE_FIELD_QUESTIONS: dict[str, str] = {
+    "user_profile.age": "만 나이(또는 생년월일)가 어떻게 되세요?",
     "user_profile.residence_area": "주민등록상 거주하시는 시·도가 어디인가요? (예: 서울, 경기)",
     "user_profile.owned_house_count": (
         "현재 세대가 보유한 주택이 몇 채인가요? (분양권·입주권 포함, 없으면 0)"
     ),
+    "target_housing.target_region": "청약을 노리는 지역이 어디인가요? (예: 서울 마포구, 경기 하남)",
+    "subscription_account.duration_months": (
+        "청약통장 가입기간이 몇 개월인가요? 통장이 없으면 0으로 알려주세요."
+    ),
+}
+
+FULL_FIELD_QUESTIONS: dict[str, str] = {
     "user_profile.homeless_duration_months": (
         "무주택 기간이 몇 개월인가요? 만 30세(또는 그 전 혼인신고일)부터, 주택을 처분한 "
-        "적이 있으면 처분 후 무주택자가 된 날부터 셉니다. 유주택이면 0."
+        "적이 있으면 처분 후 무주택자가 된 날부터 셉니다. 유주택이면 0. "
+        "(생년월일을 주시면 자동으로 계산해 드려요.)"
     ),
     "user_profile.marriage.is_married": "혼인신고 기준으로 기혼이신가요?",
     "user_profile.dependents_count": (
@@ -217,15 +244,27 @@ REQUIRED_FIELD_QUESTIONS: dict[str, str] = {
     "user_profile.income_and_assets.monthly_income_krw": (
         "가구 세전 월평균 소득이 얼마인가요? (원 단위)"
     ),
-    "subscription_account.duration_months": (
-        "청약통장 가입기간이 몇 개월인가요? 통장이 없으면 0으로 알려주세요."
-    ),
     "subscription_account.total_balance_krw": "청약통장 납입 총액(예치금)이 얼마인가요? (원 단위)",
-    "target_housing.target_region": "청약을 노리는 지역이 어디인가요? (예: 서울 마포구, 경기 하남)",
+}
+
+# 하위호환: 종전 명칭으로 참조하는 코드/문서를 위해 core+full 합본을 남긴다.
+REQUIRED_FIELD_QUESTIONS: dict[str, str] = {**CORE_FIELD_QUESTIONS, **FULL_FIELD_QUESTIONS}
+
+# 값이 비어도 대체 필드가 있으면 '채워진 것'으로 본다 — 생년월일이 나이·무주택기간을 대신한다.
+_SATISFYING_ALTERNATIVES: dict[str, tuple[str, ...]] = {
+    "user_profile.age": ("user_profile.birth_date",),
+    "user_profile.homeless_duration_months": ("user_profile.birth_date",),
 }
 
 # 있으면 판정 정확도가 올라가는 필드와 안내 질문.
 OPTIONAL_FIELD_QUESTIONS: dict[str, str] = {
+    "user_profile.birth_date": (
+        "생년월일이 어떻게 되세요? (YYYY-MM-DD — 무주택기간과 만 나이를 정확히 계산합니다)"
+    ),
+    "user_profile.homeless_since_date": (
+        "과거에 주택을 처분한 적이 있다면, 무주택자가 된 날이 언제인가요? "
+        "(생년월일과 함께 무주택기간 계산에 씁니다)"
+    ),
     "user_profile.owns_home_self": (
         "그 주택을 본인 또는 배우자가 소유하고 있나요? (부모 등 세대원 소유면 '아니오')"
     ),
@@ -268,16 +307,35 @@ def _get_by_path(doc: dict, path: str) -> object | None:
     return node
 
 
-def missing_fields(doc: dict) -> tuple[list[dict[str, str]], list[dict[str, str]]]:
-    """(필수 누락, 선택 누락) 필드 목록을 [{field, question}] 형태로 돌려준다."""
-    required = [
+def _is_present(doc: dict, path: str) -> bool:
+    """path에 값이 있거나, 대체 필드(예: 생년월일)가 있으면 채워진 것으로 본다."""
+    if _get_by_path(doc, path) is not None:
+        return True
+    return any(_get_by_path(doc, alt) is not None for alt in _SATISFYING_ALTERNATIVES.get(path, ()))
+
+
+def missing_fields(
+    doc: dict,
+) -> tuple[list[dict[str, str]], list[dict[str, str]], list[dict[str, str]]]:
+    """(core 누락, full 누락, optional 누락) 필드 목록을 [{field, question}]로 돌려준다.
+
+    - core 누락이 있으면 판정을 미루고 물어본다(needs_more_info).
+    - core만 차고 full이 비면 '잠정 판정'을 수행한다.
+    - optional은 있으면 정확도만 올라간다.
+    """
+    core = [
         {"field": path, "question": question}
-        for path, question in REQUIRED_FIELD_QUESTIONS.items()
-        if _get_by_path(doc, path) is None
+        for path, question in CORE_FIELD_QUESTIONS.items()
+        if not _is_present(doc, path)
+    ]
+    full = [
+        {"field": path, "question": question}
+        for path, question in FULL_FIELD_QUESTIONS.items()
+        if not _is_present(doc, path)
     ]
     optional = [
         {"field": path, "question": question}
         for path, question in OPTIONAL_FIELD_QUESTIONS.items()
         if _get_by_path(doc, path) is None
     ]
-    return required, optional
+    return core, full, optional
