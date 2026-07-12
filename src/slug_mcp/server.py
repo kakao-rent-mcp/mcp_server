@@ -39,6 +39,10 @@ mcp = FastMCP(
         "권장 사용 흐름: (1) 대화에서 파악한 사용자 정보를 update_my_profile로 저장하고 "
         "응답의 next_questions로 부족한 정보를 물어 채운다 → (2) 같은 session_id로 "
         "analyze_my_subscription(종합 판정) 또는 recommend_housing(공고 추천)을 호출한다. "
+        "임대주택(영구·국민·행복·공공임대) 상담이면 update_my_profile에 "
+        "target_housing.track='rental'(+rental_type)을 채우세요 — 임대에 맞는 질문이 "
+        "안내됩니다. 임대 공고 검색·공고문 원문은 search_lease_notices/"
+        "extract_lease_notice_text를 사용합니다. "
         "금액 단위는 모두 원(KRW)이며 필드명에 _krw가 붙습니다. "
         "프로필은 서버 메모리에 24시간만 보관됩니다."
     ),
