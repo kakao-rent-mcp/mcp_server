@@ -53,9 +53,11 @@ def test_permanent_rental_never_asks_subscription_account():
     result = profile_tools.update_my_profile(
         target_housing=TargetHousing(track=HousingTrack.RENTAL, rental_type=RentalType.PERMANENT)
     )
-    all_missing = _missing_paths(result) + _missing_paths(
-        result, "missing_recommended_fields"
-    ) + _missing_paths(result, "missing_optional_fields")
+    all_missing = (
+        _missing_paths(result)
+        + _missing_paths(result, "missing_recommended_fields")
+        + _missing_paths(result, "missing_optional_fields")
+    )
     # 영구임대는 수급자 순위제라 청약통장이 아예 필요 없다.
     assert not any(path.startswith("subscription_account") for path in all_missing)
 
