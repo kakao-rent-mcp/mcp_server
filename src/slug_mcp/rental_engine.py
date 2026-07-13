@@ -139,3 +139,112 @@ def judge_permanent(
         "basis": "수급·한부모·유공자 자격이 없고 소득이 2순위 상한을 초과합니다.",
         "notes": notes,
     }
+
+
+def _bracket_points(bracket: dict[int, int], value: int) -> int:
+    """{하한: 점수} 표에서 value가 충족하는 최고 점수를 고른다 (미달이면 0)."""
+    return max((pts for threshold, pts in bracket.items() if value >= threshold), default=0)
+
+
+def national_tiebreak_score(
+    *,
+    age: int,
+    dependents_count: int,
+    residence_years: int,
+    children_count: int,
+    payment_count: int,
+    rules: dict[str, Any],
+) -> dict[str, Any]:
+    """국민임대 동일순위 경쟁 시 배점. 고령부양 항목은 프로필 미수집이라 0점 처리."""
+    table = rules["national"]["tiebreak_score_table"]
+    score = {
+        "age": _bracket_points(table["age"], age),
+        "dependents": _bracket_points(table["dependents"], dependents_count),
+        "residence_years": _bracket_points(table["residence_years"], residence_years),
+        "minor_children": _bracket_points(table["minor_children"], children_count),
+        "payment_count": _bracket_points(table["payment_count"], payment_count),
+        "elderly_care": 0,
+    }
+    notes = [
+        "고령부양 배점(65세 이상 직계존속 1년 이상 부양, 3점)은 수집 항목이 아니라 "
+        "0점으로 두었습니다 — 해당되면 실제 배점이 3점 높습니다."
+    ]
+    return {**score, "total": sum(score.values()), "notes": notes}
+
+
+def judge_national(
+    *,
+    income_ratio: float | None,
+    household_size: int,
+    desired_size_sqm: float | None,
+    account_months: int,
+    payment_count: int,
+    age: int,
+    dependents_count: int,
+    residence_years: int,
+    children_count: int,
+    rules: dict[str, Any],
+) -> dict[str, Any]:
+    """국민임대: 소득컷(70%) → 면적별 순위(50㎡ 미만 거주지 / 이상 통장) → 동순위 배점."""
+    cfg = rules["national"]
+    notes: list[str] = []
+    tiebreak = national_tiebreak_score(
+        age=age,
+        dependents_count=dependents_count,
+        residence_years=residence_years,
+        children_count=children_count,
+        payment_count=payment_count,
+        rules=rules,
+    )
+    income_ok = income_within_cap(income_ratio, cfg["income_pct"], household_size, rules)
+    if income_ok is False:
+        return {
+            "eligible": False,
+            "rank": None,
+            "basis": f"가구 소득이 국민임대 상한({cfg['income_pct']}% + 1·2인 가산)을 초과합니다.",
+            "notes": notes,
+            "tiebreak": tiebreak,
+        }
+    if income_ok is None:
+        notes.append("소득표 밖(8인 이상 가구 등)이라 소득요건은 공고문으로 확인해야 합니다.")
+
+    if desired_size_sqm is not None and desired_size_sqm < 50:
+        priority_ok = income_within_cap(
+            income_ratio, cfg["income_pct_priority_under_50sqm"], household_size, rules
+        )
+        if priority_ok:
+            notes.append("소득 50% 이하 — 전용 50㎡ 미만 우선공급 대상입니다.")
+        notes.append(
+            "전용 50㎡ 미만은 거주 시·군·구로 순위가 갈립니다(당해 1순위/연접 2순위/기타 "
+            "3순위) — 거주지가 공고 지역과 같은 시·군인지 공고문으로 확인하세요."
+        )
+        return {
+            "eligible": True,
+            "rank": None,
+            "basis": "소득요건 충족(50㎡ 미만, 거주지 순위)",
+            "notes": notes,
+            "tiebreak": tiebreak,
+        }
+
+    if desired_size_sqm is None:
+        notes.append("희망 전용면적 미입력 — 50㎡ 이상(통장 순위) 기준으로 판정했습니다.")
+    rank_cfg = cfg["rank_50sqm_or_more"]
+    if (
+        account_months >= rank_cfg["rank1"]["account_months"]
+        and payment_count >= rank_cfg["rank1"]["payment_count"]
+    ):
+        rank = 1
+    elif (
+        account_months >= rank_cfg["rank2"]["account_months"]
+        and payment_count >= rank_cfg["rank2"]["payment_count"]
+    ):
+        rank = 2
+    else:
+        rank = 3
+    return {
+        "eligible": True,
+        "rank": rank,
+        "basis": f"소득요건 충족, 통장 기준 {rank}순위",
+        "notes": notes,
+        "tiebreak": tiebreak,
+    }

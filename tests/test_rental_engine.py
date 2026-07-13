@@ -94,3 +94,58 @@ def test_permanent_income_under_50pct_is_rank2_with_bonus_note():
 def test_permanent_over_income_without_priority_is_ineligible():
     result = _judge_permanent(income_ratio=95.0)
     assert (result["eligible"], result["rank"]) == (False, None)
+
+
+def test_national_tiebreak_score_brackets():
+    rules = load_rental_rules()
+    score = rental_engine.national_tiebreak_score(
+        age=52,
+        dependents_count=2,
+        residence_years=6,
+        children_count=1,
+        payment_count=70,
+        rules=rules,
+    )
+    # 나이 50+→3, 부양 2인→2, 거주 5년+→3, 미성년 1명→0(표는 2명부터), 납입 60회+→3.
+    assert (score["age"], score["dependents"], score["residence_years"]) == (3, 2, 3)
+    assert (score["minor_children"], score["payment_count"]) == (0, 3)
+    # 고령부양 항목은 프로필 미수집 — 0점 + 안내.
+    assert score["elderly_care"] == 0
+    assert score["total"] == 11
+    assert any("고령" in note for note in score["notes"])
+
+
+def _judge_national(**overrides):
+    kwargs = dict(
+        income_ratio=60.0,
+        household_size=3,
+        desired_size_sqm=59.0,
+        account_months=30,
+        payment_count=30,
+        age=40,
+        dependents_count=2,
+        residence_years=3,
+        children_count=1,
+        rules=load_rental_rules(),
+    )
+    kwargs.update(overrides)
+    return rental_engine.judge_national(**kwargs)
+
+
+def test_national_income_over_cap_is_ineligible():
+    # 3인 가구는 가산 없음 — 70% 초과 시 탈락.
+    result = _judge_national(income_ratio=73.0)
+    assert result["eligible"] is False
+
+
+def test_national_50sqm_or_more_ranks_by_account():
+    assert _judge_national(account_months=30, payment_count=30)["rank"] == 1  # 24개월·24회 이상
+    assert _judge_national(account_months=12, payment_count=12)["rank"] == 2  # 6개월·6회 이상
+    assert _judge_national(account_months=0, payment_count=0)["rank"] == 3
+
+
+def test_national_under_50sqm_rank_needs_sigungu_and_says_so():
+    result = _judge_national(desired_size_sqm=40.0, income_ratio=45.0)
+    assert result["eligible"] is True
+    assert result["rank"] is None  # 거주 시·군·구를 수집하지 않아 당해/연접 판정 불가
+    assert any("거주" in note for note in result["notes"])
