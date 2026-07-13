@@ -34,10 +34,18 @@ def _profile_status(session_id: str, doc: dict[str, Any]) -> dict[str, Any]:
     else:
         next_questions = [item["question"] for item in optional[:2]]
 
+    is_rental = full_profile.get("target_housing", {}).get("track") == "rental"
     if core:
         guidance = (
             "next_questions를 사용자에게 물어 답을 받은 뒤, 같은 session_id로 update_my_profile을 "
             "다시 호출해 채워 넣으세요. core 항목이 다 차면 잠정 판정이 가능합니다."
+        )
+    elif is_rental:
+        # 임대는 자동판정이 아직 없다 — 채운 프로필과 공고문 원문 대조를 안내한다.
+        guidance = (
+            "임대 프로필이 준비됐습니다. 임대 자격 자동판정은 아직 지원하지 않으므로, "
+            "search_lease_notices로 공고를 찾고 extract_lease_notice_text로 공고문 원문의 "
+            "소득·자산 기준을 이 프로필과 대조해 주세요."
         )
     elif full:
         guidance = (
@@ -70,17 +78,20 @@ def update_my_profile(
     subscription_account: SubscriptionAccount | None = None,
     reset: bool = False,
 ) -> dict[str, Any]:
-    """사용자 프로필을 세션에 저장·부분 갱신한다. 청약 분석·추천의 첫 단계.
+    """사용자 프로필을 세션에 저장·부분 갱신한다. 청약(분양)·임대 상담의 첫 단계.
 
     대화에서 파악한 값만 채워서 여러 번 호출하면 서버가 누적 병합한다.
     첫 호출은 session_id 없이 하고, 응답의 session_id를 이후 모든 호출에 재사용한다.
     응답의 next_questions에 아직 부족한 정보를 물어볼 질문이 들어 있다.
+    사용자가 임대주택(영구임대·국민임대·행복주택·공공임대)을 찾으면
+    target_housing.track="rental"(가능하면 rental_type까지)을 채워야
+    임대에 맞는 질문(소득·자산·수급자격 등)이 안내된다.
     금액은 전부 원(KRW) 단위. reset=true면 세션을 비우고 새로 시작한다.
 
     Args:
         session_id: 기존 세션 ID (첫 호출이면 비움)
-        target_housing: 희망 지역·전용면적·강제매칭 여부
-        user_profile: 나이·거주지·무주택기간·혼인·가족·소득·자산 정보
+        target_housing: 트랙(분양/임대)·임대유형·희망 지역·전용면적·강제매칭 여부
+        user_profile: 나이·거주지·무주택기간·혼인·가족·소득·자산·수급자격 정보
         subscription_account: 청약통장 가입기간·납입횟수·납입총액(예치금)
         reset: true면 세션 프로필을 비우고 다시 시작
     """

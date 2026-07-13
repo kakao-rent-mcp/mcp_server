@@ -62,9 +62,57 @@ LH_REGION_CODES: dict[str, str] = {
 }
 
 
-class TargetHousing(BaseModel):
-    """희망하는 청약 대상."""
+class HousingTrack(StrEnum):
+    """상담 트랙. 분양(청약)과 임대는 자격 축과 물어볼 정보가 다르다."""
 
+    SALE = "sale"  # 분양(청약) — 기본값. 가점·예치금·특별공급 축
+    RENTAL = "rental"  # 임대(LH 등) — 소득·자산·수급자격 축
+
+
+class RentalType(StrEnum):
+    """임대주택 세부유형. 유형마다 선정 방식이 달라 물어볼 정보가 갈린다.
+
+    실제 LH 공고문 4종(2026-07 실측) 기준: 영구임대는 수급자 순위제(통장 무관),
+    국민·공공임대는 청약통장 납입횟수로 선정, 행복주택은 계층 구분 + 지역순위.
+    """
+
+    PERMANENT = "permanent"  # 영구임대 — 수급자·차상위 대상, 청약통장 불필요
+    NATIONAL = "national"  # 국민임대 — 통장 납입횟수 선정
+    HAPPY = "happy"  # 행복주택 — 청년/신혼/고령 계층 + 지역순위
+    PUBLIC = "public"  # 공공임대(5·10·50년) — 통장 납입횟수 선정
+
+
+class WelfareStatus(BaseModel):
+    """수급·복지 자격. 임대주택의 순위·배점 근거가 된다 (분양에는 쓰이지 않음)."""
+
+    is_basic_living_recipient: bool | None = Field(
+        default=None, description="생계급여 또는 의료급여 수급자 여부 (영구임대 1순위 근거)"
+    )
+    is_near_poverty: bool | None = Field(default=None, description="차상위계층 여부")
+    is_national_merit: bool | None = Field(
+        default=None, description="국가유공자·보훈보상대상자(유족 포함) 여부"
+    )
+    long_term_care_grade: int | None = Field(
+        default=None,
+        ge=1,
+        le=6,
+        description="노인장기요양등급 (3~5등급·인지지원등급은 고령자 영구임대 배점 대상)",
+    )
+
+
+class TargetHousing(BaseModel):
+    """희망하는 청약·임대 대상."""
+
+    track: HousingTrack | None = Field(
+        default=None,
+        description="상담 트랙: sale(분양·청약) | rental(임대). 사용자가 임대주택"
+        "(영구임대·국민임대·행복주택·공공임대 등)을 찾으면 rental로 설정. 비우면 분양으로 간주",
+    )
+    rental_type: RentalType | None = Field(
+        default=None,
+        description="임대 세부유형: permanent(영구임대) | national(국민임대) | "
+        "happy(행복주택) | public(공공임대). track=rental일 때만 의미 있음",
+    )
     target_region: str | None = Field(
         default=None,
         description="희망 공급지역 (예: '서울 마포구', '경기 하남', '부산'). "
@@ -200,6 +248,12 @@ class UserProfile(BaseModel):
         default=False, description="3세대 이상 동거 여부 (다자녀 특공 세대구성 가점)"
     )
     is_single_parent: bool = Field(default=False, description="한부모 가구 여부")
+    is_single_household: bool | None = Field(
+        default=None,
+        description="단독세대주 여부 — 세대별 주민등록표에 배우자·직계존비속 세대원이 "
+        "없는 사람 (임대주택 배점용. 세대주 여부와는 다른 개념)",
+    )
+    welfare: WelfareStatus = Field(default_factory=WelfareStatus)
     income_and_assets: IncomeAssets = Field(default_factory=IncomeAssets)
 
 
@@ -217,6 +271,9 @@ class ProfileDocument(BaseModel):
 #       가입기간·지역 등급·만 나이). 하나라도 비면 판정을 미루고 물어본다.
 # full: core에 더해 이 항목까지 채우면 '정밀 판정'이 된다(예치금·소득·부양가족·혼인). 비어도
 #       판정은 수행하되, 해당 트랙 점수를 '미확정'으로 표시하고 채우라고 안내한다(action_items).
+#
+# 아래 CORE/FULL/OPTIONAL 3종은 분양(청약) 트랙용이다. 임대 트랙
+# (target_housing.track == "rental")은 뒤의 RENTAL_* 세트를 쓴다 — missing_fields가 분기한다.
 CORE_FIELD_QUESTIONS: dict[str, str] = {
     "user_profile.age": "만 나이(또는 생년월일)가 어떻게 되세요?",
     "user_profile.residence_area": "주민등록상 거주하시는 시·도가 어디인가요? (예: 서울, 경기)",
@@ -298,6 +355,81 @@ OPTIONAL_FIELD_QUESTIONS: dict[str, str] = {
 }
 
 
+# ── 임대 트랙 질문 세트 ──────────────────────────────────────────────────
+# 실제 LH 공고문 4종(영구·국민·행복·공공임대, 2026-07 실측)에서 뽑은 자격 축.
+# 임대는 소득·자산이 자격 게이트라 core로 올라오고, 청약통장은 유형에 따라 갈린다
+# (국민·공공=납입횟수 선정, 행복=통장 보유 필요, 영구=불필요).
+RENTAL_CORE_FIELD_QUESTIONS: dict[str, str] = {
+    # 유형을 모르면 어떤 통장·소득 기준을 물을지 정할 수 없으므로 가장 먼저 묻는다.
+    "target_housing.rental_type": (
+        "어떤 임대주택을 찾으세요? (영구임대/국민임대/행복주택/공공임대 — 공고문에 적혀 있어요)"
+    ),
+    "user_profile.age": "만 나이(또는 생년월일)가 어떻게 되세요?",
+    "user_profile.residence_area": "주민등록상 거주하시는 시·도가 어디인가요? (예: 서울, 경기)",
+    "user_profile.owned_house_count": (
+        "현재 세대가 보유한 주택이 몇 채인가요? (분양권·입주권 포함, 없으면 0)"
+    ),
+    "target_housing.target_region": "입주를 원하는 지역이 어디인가요? (예: 성남시, 경기 하남)",
+    "user_profile.income_and_assets.monthly_income_krw": (
+        "가구 세전 월평균 소득이 얼마인가요? (원 단위 — 임대주택은 소득기준이 자격 요건입니다)"
+    ),
+    "user_profile.welfare.is_basic_living_recipient": (
+        "생계급여 또는 의료급여 수급자이신가요? (영구임대 1순위 등 순위 판단에 필요)"
+    ),
+}
+
+# 임대 세부유형별로 core에 더해지는 질문. 유형이 아직 없으면 공통 core만 묻는다.
+RENTAL_CORE_BY_TYPE: dict[str, dict[str, str]] = {
+    RentalType.NATIONAL: {
+        "subscription_account.payment_count": (
+            "청약통장 납입 횟수가 몇 회인가요? (국민임대는 납입인정횟수로 순위를 정합니다)"
+        ),
+    },
+    RentalType.PUBLIC: {
+        "subscription_account.payment_count": (
+            "청약통장 납입 횟수가 몇 회인가요? (공공임대는 납입인정횟수로 순위를 정합니다)"
+        ),
+    },
+    RentalType.HAPPY: {
+        "subscription_account.duration_months": (
+            "청약통장 가입기간이 몇 개월인가요? "
+            "(행복주택은 입주 전까지 통장이 필요합니다. 없으면 0)"
+        ),
+    },
+    RentalType.PERMANENT: {},  # 영구임대는 청약통장 불필요
+}
+
+RENTAL_FULL_FIELD_QUESTIONS: dict[str, str] = {
+    "user_profile.income_and_assets.total_real_estate_krw": (
+        "세대 보유 부동산 자산이 얼마인가요? (임대주택은 총자산 기준이 자격 요건입니다)"
+    ),
+    "user_profile.income_and_assets.car_value_krw": (
+        "자동차 가액이 얼마인가요? (임대주택은 자동차 가액 상한이 별도로 있습니다)"
+    ),
+    "user_profile.residence_years_in_region": (
+        "입주 희망 지역(시·군)에 몇 년째 연속 거주 중이신가요? (거주기간 배점에 쓰입니다)"
+    ),
+    "user_profile.is_single_household": (
+        "단독세대주이신가요? (세대별 주민등록표에 배우자·직계존비속 세대원이 없는 경우 — 배점 항목)"
+    ),
+}
+
+RENTAL_OPTIONAL_FIELD_QUESTIONS: dict[str, str] = {
+    "user_profile.welfare.is_near_poverty": "차상위계층에 해당하시나요?",
+    "user_profile.welfare.is_national_merit": (
+        "국가유공자·보훈보상대상자(유족 포함)에 해당하시나요? (임대 순위·기관추천에 반영)"
+    ),
+    "user_profile.welfare.long_term_care_grade": (
+        "노인장기요양등급이 있으신가요? (3~5등급·인지지원등급 — 고령자 영구임대 배점)"
+    ),
+    "user_profile.birth_date": (
+        "생년월일이 어떻게 되세요? (YYYY-MM-DD — 연령 배점·계층 판단을 정확히 합니다)"
+    ),
+    "user_profile.marriage.is_married": "혼인신고 기준으로 기혼이신가요? (행복주택 신혼 계층 판단)",
+    "user_profile.children_count": "미성년 자녀가 몇 명인가요? (태아 포함)",
+}
+
+
 def _get_by_path(doc: dict, path: str) -> object | None:
     node: object = doc
     for part in path.split("."):
@@ -314,28 +446,45 @@ def _is_present(doc: dict, path: str) -> bool:
     return any(_get_by_path(doc, alt) is not None for alt in _SATISFYING_ALTERNATIVES.get(path, ()))
 
 
+def _question_sets(doc: dict) -> tuple[dict[str, str], dict[str, str], dict[str, str]]:
+    """트랙(분양/임대)에 맞는 (core, full, optional) 질문표를 고른다.
+
+    track 미지정이면 분양(sale)으로 간주해 기존 동작을 그대로 유지한다.
+    임대는 세부유형(rental_type)이 있으면 유형별 core 질문(통장 등)을 더한다.
+    """
+    if _get_by_path(doc, "target_housing.track") != HousingTrack.RENTAL:
+        return CORE_FIELD_QUESTIONS, FULL_FIELD_QUESTIONS, OPTIONAL_FIELD_QUESTIONS
+    rental_type = _get_by_path(doc, "target_housing.rental_type")
+    core = dict(RENTAL_CORE_FIELD_QUESTIONS)
+    if isinstance(rental_type, str):
+        core.update(RENTAL_CORE_BY_TYPE.get(rental_type, {}))
+    return core, RENTAL_FULL_FIELD_QUESTIONS, RENTAL_OPTIONAL_FIELD_QUESTIONS
+
+
 def missing_fields(
     doc: dict,
 ) -> tuple[list[dict[str, str]], list[dict[str, str]], list[dict[str, str]]]:
     """(core 누락, full 누락, optional 누락) 필드 목록을 [{field, question}]로 돌려준다.
 
+    트랙(target_housing.track)에 따라 분양/임대 질문표로 분기한다.
     - core 누락이 있으면 판정을 미루고 물어본다(needs_more_info).
     - core만 차고 full이 비면 '잠정 판정'을 수행한다.
     - optional은 있으면 정확도만 올라간다.
     """
+    core_questions, full_questions, optional_questions = _question_sets(doc)
     core = [
         {"field": path, "question": question}
-        for path, question in CORE_FIELD_QUESTIONS.items()
+        for path, question in core_questions.items()
         if not _is_present(doc, path)
     ]
     full = [
         {"field": path, "question": question}
-        for path, question in FULL_FIELD_QUESTIONS.items()
+        for path, question in full_questions.items()
         if not _is_present(doc, path)
     ]
     optional = [
         {"field": path, "question": question}
-        for path, question in OPTIONAL_FIELD_QUESTIONS.items()
+        for path, question in optional_questions.items()
         if _get_by_path(doc, path) is None
     ]
     return core, full, optional
