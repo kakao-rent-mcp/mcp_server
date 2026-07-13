@@ -19,7 +19,7 @@ from typing import Any, Literal, cast, get_args
 from dotenv import load_dotenv
 from fastmcp import FastMCP
 
-from .tools import analyze, competition, lh_lease, notices, profile, recommend
+from .tools import analyze, competition, lh_lease, notices, profile, recommend, rental_analyze
 
 # .env의 서비스키(DECODING_KEY/ENCODING_KEY 등)를 프로세스 환경변수로 로드한다.
 # 이미 설정된 환경변수는 덮어쓰지 않는다(override=False 기본값).
@@ -40,9 +40,9 @@ mcp = FastMCP(
         "응답의 next_questions로 부족한 정보를 물어 채운다 → (2) 같은 session_id로 "
         "analyze_my_subscription(종합 판정) 또는 recommend_housing(공고 추천)을 호출한다. "
         "임대주택(영구·국민·행복·공공임대) 상담이면 update_my_profile에 "
-        "target_housing.track='rental'(+rental_type)을 채우세요 — 임대에 맞는 질문이 "
-        "안내됩니다. 임대 공고 검색·공고문 원문은 search_lease_notices/"
-        "extract_lease_notice_text를 사용합니다. "
+        "target_housing.track='rental'(+rental_type)을 채우고 같은 session_id로 "
+        "analyze_my_rental(자격·순위 잠정판정)을 호출하세요. 임대 공고 검색·공고문 원문은 "
+        "search_lease_notices/extract_lease_notice_text를 사용합니다. "
         "금액 단위는 모두 원(KRW)이며 필드명에 _krw가 붙습니다. "
         "프로필은 서버 메모리에 24시간만 보관됩니다."
     ),
@@ -71,6 +71,7 @@ _TOOLS: tuple[tuple[Callable[..., Any], str, dict[str, Any]], ...] = (
     (profile.update_my_profile, "내 프로필 저장·갱신", _WRITE_LOCAL),
     (profile.get_my_profile, "내 프로필 조회", _READ_LOCAL),
     (analyze.analyze_my_subscription, "청약 종합 판정", _READ_LOCAL),
+    (rental_analyze.analyze_my_rental, "임대 자격 판정", _READ_LOCAL),
     (recommend.recommend_housing, "맞춤 청약 추천", _READ_EXTERNAL),
 )
 

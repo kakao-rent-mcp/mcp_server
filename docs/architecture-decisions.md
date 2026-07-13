@@ -76,6 +76,10 @@ append-only 로그입니다. 새 결정은 아래에 이어서 추가하세요. 
 
 **관련 문서**: [product-concept.md](product-concept.md), [playmcp-guidelines.md](playmcp-guidelines.md)
 
+**추가 노트 (2026-07-13)**: analyze_my_rental 추가로 11개 — 사용자 결정으로
+분양/임대 판정 도구를 분리(트랙별 docstring 최적화), 하드캡 20개 이내,
+tests/test_server.py 상한 단언은 하드캡 기준으로 갱신됨.
+
 ---
 
 ## ADR-003

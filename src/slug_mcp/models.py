@@ -89,6 +89,9 @@ class WelfareStatus(BaseModel):
         default=None, description="생계급여 또는 의료급여 수급자 여부 (영구임대 1순위 근거)"
     )
     is_near_poverty: bool | None = Field(default=None, description="차상위계층 여부")
+    is_housing_benefit_recipient: bool | None = Field(
+        default=None, description="주거급여 수급자 여부 (행복주택 주거급여수급자 계층 판단)"
+    )
     is_national_merit: bool | None = Field(
         default=None, description="국가유공자·보훈보상대상자(유족 포함) 여부"
     )
@@ -373,6 +376,9 @@ RENTAL_CORE_FIELD_QUESTIONS: dict[str, str] = {
     "user_profile.income_and_assets.monthly_income_krw": (
         "가구 세전 월평균 소득이 얼마인가요? (원 단위 — 임대주택은 소득기준이 자격 요건입니다)"
     ),
+    "user_profile.dependents_count": (
+        "본인 제외 부양가족(세대원)이 몇 명인가요? (가구원수별 소득 상한 판정에 필요합니다)"
+    ),
     "user_profile.welfare.is_basic_living_recipient": (
         "생계급여 또는 의료급여 수급자이신가요? (영구임대 1순위 등 순위 판단에 필요)"
     ),
@@ -384,10 +390,16 @@ RENTAL_CORE_BY_TYPE: dict[str, dict[str, str]] = {
         "subscription_account.payment_count": (
             "청약통장 납입 횟수가 몇 회인가요? (국민임대는 납입인정횟수로 순위를 정합니다)"
         ),
+        "subscription_account.duration_months": (
+            "청약통장 가입기간이 몇 개월인가요? (납입횟수와 함께 순위를 정합니다. 없으면 0)"
+        ),
     },
     RentalType.PUBLIC: {
         "subscription_account.payment_count": (
             "청약통장 납입 횟수가 몇 회인가요? (공공임대는 납입인정횟수로 순위를 정합니다)"
+        ),
+        "subscription_account.duration_months": (
+            "청약통장 가입기간이 몇 개월인가요? (납입횟수와 함께 순위를 정합니다. 없으면 0)"
         ),
     },
     RentalType.HAPPY: {
@@ -416,6 +428,9 @@ RENTAL_FULL_FIELD_QUESTIONS: dict[str, str] = {
 
 RENTAL_OPTIONAL_FIELD_QUESTIONS: dict[str, str] = {
     "user_profile.welfare.is_near_poverty": "차상위계층에 해당하시나요?",
+    "user_profile.welfare.is_housing_benefit_recipient": (
+        "주거급여를 받고 계신가요? (행복주택 주거급여수급자 계층 — 소득기준 없이 신청 가능)"
+    ),
     "user_profile.welfare.is_national_merit": (
         "국가유공자·보훈보상대상자(유족 포함)에 해당하시나요? (임대 순위·기관추천에 반영)"
     ),
@@ -427,6 +442,16 @@ RENTAL_OPTIONAL_FIELD_QUESTIONS: dict[str, str] = {
     ),
     "user_profile.marriage.is_married": "혼인신고 기준으로 기혼이신가요? (행복주택 신혼 계층 판단)",
     "user_profile.children_count": "미성년 자녀가 몇 명인가요? (태아 포함)",
+    "user_profile.infants_count": (
+        "만 6세 미만 자녀가 몇 명인가요? (행복주택 신혼부부·한부모 계층 판단 — 공고문 기준은 "
+        "'6세 이하'라 만 6세 자녀가 있으면 공고문으로 확인하세요)"
+    ),
+    "user_profile.marriage.marriage_date": (
+        "혼인신고일이 언제인가요? (행복주택 신혼부부 계층의 '혼인 7년 이내' 판단에 필요)"
+    ),
+    "user_profile.is_single_parent": (
+        "한부모 가구이신가요? (영구임대 1순위·행복주택 한부모 계층 판단에 반영)"
+    ),
 }
 
 

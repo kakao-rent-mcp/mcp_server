@@ -77,6 +77,17 @@ def test_happy_rental_asks_account_duration_as_core():
     assert "subscription_account.duration_months" in _missing_paths(result)
 
 
+def test_national_and_public_rental_ask_account_duration_as_core():
+    """국민·공공임대는 통장 가입기간이 순위 판정 입력이라 core로 물어야 한다(회귀 방지)."""
+    for rental_type in (RentalType.NATIONAL, RentalType.PUBLIC):
+        result = profile_tools.update_my_profile(
+            target_housing=TargetHousing(track=HousingTrack.RENTAL, rental_type=rental_type)
+        )
+        missing = _missing_paths(result)
+        assert "subscription_account.duration_months" in missing
+        assert "subscription_account.payment_count" in missing
+
+
 def test_sale_track_questions_unchanged_by_rental_feature():
     # track 미지정 = 분양. 기존 분양 core 질문표와 완전히 동일해야 한다(회귀 가드).
     core, _full, _optional = missing_fields({})
@@ -95,6 +106,7 @@ def test_filled_rental_profile_guides_to_lease_tools():
             residence_area="경기",
             residence_years_in_region=5,
             owned_house_count=0,
+            dependents_count=0,
             is_single_household=True,
             welfare=WelfareStatus(is_basic_living_recipient=True),
             income_and_assets=IncomeAssets(
@@ -106,7 +118,8 @@ def test_filled_rental_profile_guides_to_lease_tools():
     )
     assert result["missing_required_fields"] == []
     assert result["missing_recommended_fields"] == []
-    # 임대는 자동판정 미지원이므로 공고문 원문 대조 도구를 안내한다.
+    # 임대는 analyze_my_rental로 판정하고, 공고문 원문 대조 도구도 함께 안내한다.
+    assert "analyze_my_rental" in result["guidance"]
     assert "extract_lease_notice_text" in result["guidance"]
 
 
@@ -115,6 +128,13 @@ def test_analyze_refuses_rental_track_explicitly():
         target_housing=TargetHousing(track=HousingTrack.RENTAL, rental_type=RentalType.NATIONAL)
     )
     result = analyze_tools.analyze_my_subscription(created["session_id"])
-    # 분양 룰로 오판정하지 않고 명시적으로 미지원을 알린다.
-    assert result["status"] == "rental_not_supported"
-    assert "extract_lease_notice_text" in result["guidance"]
+    # 분양 룰로 오판정하지 않고 전용 도구(analyze_my_rental)로 위임한다.
+    assert result["status"] == "rental_track"
+    assert "analyze_my_rental" in result["guidance"]
+
+
+def test_welfare_has_housing_benefit_field_and_rental_optional_question():
+    from slug_mcp.models import RENTAL_OPTIONAL_FIELD_QUESTIONS
+
+    assert WelfareStatus(is_housing_benefit_recipient=True).is_housing_benefit_recipient is True
+    assert "user_profile.welfare.is_housing_benefit_recipient" in RENTAL_OPTIONAL_FIELD_QUESTIONS

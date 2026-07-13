@@ -41,11 +41,11 @@ def _profile_status(session_id: str, doc: dict[str, Any]) -> dict[str, Any]:
             "다시 호출해 채워 넣으세요. core 항목이 다 차면 잠정 판정이 가능합니다."
         )
     elif is_rental:
-        # 임대는 자동판정이 아직 없다 — 채운 프로필과 공고문 원문 대조를 안내한다.
+        # 임대는 전용 판정 도구가 있다 — 같은 session_id로 바로 호출하도록 안내한다.
         guidance = (
-            "임대 프로필이 준비됐습니다. 임대 자격 자동판정은 아직 지원하지 않으므로, "
-            "search_lease_notices로 공고를 찾고 extract_lease_notice_text로 공고문 원문의 "
-            "소득·자산 기준을 이 프로필과 대조해 주세요."
+            "임대 프로필이 준비됐습니다. 이 session_id로 analyze_my_rental을 호출해 "
+            "자격·순위를 판정하세요(참고 기준선의 잠정 판정). search_lease_notices로 공고를 "
+            "찾고 extract_lease_notice_text로 공고문 원문의 소득·자산 기준과 대조해 주세요."
         )
     elif full:
         guidance = (
