@@ -248,3 +248,120 @@ def judge_national(
         "notes": notes,
         "tiebreak": tiebreak,
     }
+
+
+def infer_happy_tiers(
+    *,
+    age: int,
+    is_married: bool | None,
+    marriage_years: float | None,
+    infants_count: int,
+    is_single_parent: bool,
+    is_housing_benefit_recipient: bool | None,
+) -> list[str]:
+    """프로필로 추론 가능한 행복주택 계층 목록 (우선순위순).
+
+    대학생·취업준비생·사회초년생·산업단지근로자는 재학·재직 필드가 없어 추론하지
+    않는다 — 스펙의 '뺀 것'. 신혼부부는 '혼인 7년 이내 OR 6세 이하 자녀' OR 조건.
+    """
+    cfg_years = 7  # rental_rules.yaml happy.tiers.newlywed.marriage_years_max와 동일
+    tiers: list[str] = []
+    if is_housing_benefit_recipient:
+        tiers.append("welfare_recipient")
+    if is_married and (
+        (marriage_years is not None and marriage_years <= cfg_years) or infants_count > 0
+    ):
+        tiers.append("newlywed")
+    if is_single_parent and infants_count > 0:
+        tiers.append("single_parent")
+    if age >= 65:
+        tiers.append("elderly")
+    if 19 <= age <= 39 and not is_married:
+        tiers.append("youth")
+    return tiers
+
+
+def _happy_max_residency(tier: str, infants_count: int, rules: dict[str, Any]) -> int | None:
+    """계층별 최대 거주기간(자격이 아닌 참고 정보)."""
+    table = rules["happy"]["max_residency_years"]
+    if tier == "newlywed":
+        return table["newlywed_with_child"] if infants_count > 0 else table["newlywed_no_child"]
+    if tier == "single_parent":
+        return table["newlywed_with_child"]
+    return table.get(tier)
+
+
+def judge_happy(
+    *,
+    age: int,
+    is_married: bool | None,
+    marriage_years: float | None,
+    infants_count: int,
+    is_single_parent: bool,
+    is_housing_benefit_recipient: bool | None,
+    income_ratio: float | None,
+    household_size: int,
+    is_dual_income: bool,
+    real_estate_krw: int | None,
+    car_value_krw: int | None,
+    rules: dict[str, Any],
+) -> dict[str, Any]:
+    """행복주택: 계층 추론 → 계층별 소득·자산 대조. 첫 번째로 통과하는 계층을 채택한다."""
+    cfg = rules["happy"]
+    notes: list[str] = []
+    tiers = infer_happy_tiers(
+        age=age,
+        is_married=is_married,
+        marriage_years=marriage_years,
+        infants_count=infants_count,
+        is_single_parent=is_single_parent,
+        is_housing_benefit_recipient=is_housing_benefit_recipient,
+    )
+    if not tiers:
+        notes.append(
+            "나이·혼인·수급 정보로는 해당 계층이 없습니다. 대학생·취업준비생·사회초년생·"
+            "산업단지근로자 계층은 판정하지 않으므로, 해당된다면 공고문 자격을 확인하세요."
+        )
+        return {
+            "eligible": False,
+            "rank": None,
+            "tier": None,
+            "basis": "추론 가능한 행복주택 계층 없음",
+            "max_residency_years": None,
+            "notes": notes,
+        }
+
+    rejections: list[str] = []
+    for tier in tiers:
+        tier_cfg = cfg["tiers"][tier]
+        cap = tier_cfg.get("income_pct_dual") if is_dual_income else tier_cfg.get("income_pct")
+        cap = cap if cap is not None else tier_cfg.get("income_pct")
+        income_ok = income_within_cap(income_ratio, cap, household_size, rules)
+        if income_ok is False:
+            rejections.append(f"{tier}: 소득 초과")
+            continue
+        asset_violations = check_assets("happy", tier, real_estate_krw, car_value_krw, rules)
+        if asset_violations:
+            rejections.extend(f"{tier}: {v['reason']}" for v in asset_violations)
+            continue
+        if income_ok is None and cap is not None:
+            notes.append("소득표 밖(8인 이상 가구 등)이라 소득요건은 공고문으로 확인해야 합니다.")
+        residency = _happy_max_residency(tier, infants_count, rules)
+        return {
+            "eligible": True,
+            "rank": None,
+            "tier": tier,
+            "basis": f"행복주택 {tier} 계층 요건 충족",
+            "max_residency_years": residency,
+            "notes": notes,
+        }
+
+    notes.extend(rejections)
+    return {
+        "eligible": False,
+        "rank": None,
+        "tier": None,
+        "basis": "해당 계층은 있으나 소득·자산 요건 미충족",
+        "max_residency_years": None,
+        "notes": notes,
+    }

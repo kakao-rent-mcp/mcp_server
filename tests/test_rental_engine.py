@@ -149,3 +149,81 @@ def test_national_under_50sqm_rank_needs_sigungu_and_says_so():
     assert result["eligible"] is True
     assert result["rank"] is None  # 거주 시·군·구를 수집하지 않아 당해/연접 판정 불가
     assert any("거주" in note for note in result["notes"])
+
+
+def test_infer_happy_tiers_priority_and_conditions():
+    # 34세 기혼 5년차: 신혼부부. 미혼이면 청년. 66세면 고령자.
+    assert rental_engine.infer_happy_tiers(
+        age=34,
+        is_married=True,
+        marriage_years=5.0,
+        infants_count=0,
+        is_single_parent=False,
+        is_housing_benefit_recipient=None,
+    ) == ["newlywed"]
+    assert rental_engine.infer_happy_tiers(
+        age=34,
+        is_married=False,
+        marriage_years=None,
+        infants_count=0,
+        is_single_parent=False,
+        is_housing_benefit_recipient=None,
+    ) == ["youth"]
+    tiers = rental_engine.infer_happy_tiers(
+        age=66,
+        is_married=False,
+        marriage_years=None,
+        infants_count=0,
+        is_single_parent=False,
+        is_housing_benefit_recipient=True,
+    )
+    assert tiers[0] == "welfare_recipient" and "elderly" in tiers
+    # 혼인 10년차라도 6세 이하 자녀가 있으면 신혼부부 계층(OR 조건).
+    assert "newlywed" in rental_engine.infer_happy_tiers(
+        age=42,
+        is_married=True,
+        marriage_years=10.0,
+        infants_count=1,
+        is_single_parent=False,
+        is_housing_benefit_recipient=None,
+    )
+
+
+def _judge_happy(**overrides):
+    kwargs = dict(
+        age=30,
+        is_married=False,
+        marriage_years=None,
+        infants_count=0,
+        is_single_parent=False,
+        is_housing_benefit_recipient=None,
+        income_ratio=90.0,
+        household_size=1,
+        is_dual_income=False,
+        real_estate_krw=100_000_000,
+        car_value_krw=None,
+        rules=load_rental_rules(),
+    )
+    kwargs.update(overrides)
+    return rental_engine.judge_happy(**kwargs)
+
+
+def test_happy_youth_passes_with_household_bonus():
+    # 1인 가구 청년: 소득 상한 100% + 20%p 가산 = 120%. 90%는 통과, 125%는 탈락.
+    result = _judge_happy()
+    assert (result["eligible"], result["tier"]) == (True, "youth")
+    assert result["max_residency_years"] == 10
+    assert _judge_happy(income_ratio=125.0)["eligible"] is False
+
+
+def test_happy_no_matching_tier_is_ineligible_with_guidance():
+    # 45세 미혼 무자녀: 어떤 계층도 아님. 대학생·산단근로자 가능성 안내.
+    result = _judge_happy(age=45)
+    assert result["eligible"] is False and result["tier"] is None
+    assert any("대학생" in note or "산업단지" in note for note in result["notes"])
+
+
+def test_happy_asset_check_uses_tier_limits():
+    # 청년 총자산 상한 2억 5,100만원 초과 → 탈락.
+    result = _judge_happy(real_estate_krw=260_000_000)
+    assert result["eligible"] is False
