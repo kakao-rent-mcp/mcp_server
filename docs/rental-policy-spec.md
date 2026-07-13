@@ -1,13 +1,16 @@
 # 임대주택 자격 자동판정 설계 (analyze_my_rental)
 
-작성: 2026-07-13. 상태: 기준표 확보 완료(`config/rental_rules.yaml`), 엔진 미구현.
+작성: 2026-07-13. 상태: 구현 완료(2026-07-13). 요검증 4건은 실공고 대조 대기.
 
 ## 배경
 
 임대 트랙은 "찾기"(search_lease_notices → get_lease_notice_detail → extract_lease_notice_text)와
 프로필 질문 유도(RENTAL_CORE_BY_TYPE)까지 갖췄지만, 분양의
-analyze_my_subscription에 해당하는 자격 자동판정이 없다. `analyze.py`는
-track=rental이면 `rental_not_supported`를 돌려주고 수동 공고문 대조를 안내한다.
+analyze_my_subscription에 해당하는 자격 자동판정이 없었다. `analyze.py`는
+track=rental이면 `rental_not_supported`를 돌려주고 수동 공고문 대조를 안내했다.
+이제 `analyze.py`는 track=rental이면 `rental_track` 상태와 함께
+analyze_my_rental 호출을 안내하는 guidance를 돌려준다(자동판정은
+analyze_my_rental로 위임).
 
 ## 결정 사항
 
