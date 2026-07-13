@@ -916,7 +916,7 @@ def analyze(
         headline_core = "신청 가능한 트랙을 찾지 못했습니다"
     headline = ("[잠정 판정] " if is_provisional else "") + headline_core + "."
     if is_provisional or deduped_actions:
-        headline += " 추가 정보를 입력하면 판정이 더 정확해집니다."
+        headline += " (선택) 추가 정보를 넣으면 판정이 더 정밀해집니다."
 
     return {
         "status": "ok",

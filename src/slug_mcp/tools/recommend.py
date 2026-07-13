@@ -302,6 +302,9 @@ async def recommend_housing(
        붙이고, 경쟁률이 낮은(당첨 쉬운) 순으로 추천한다. 진행/예정 공고는 아직 자기
        결과가 없으므로, 확률을 지어내지 않고 '유사 과거 실적'만 제시한다.
 
+    action_items와 headline의 추가 정보 안내는 '채우면 판정이 더 정밀해지는' 선택 항목이다.
+    신청 가능한 트랙이 없더라도 결과를 먼저 제시하고, 추가 정보를 필수처럼 되묻지 말 것.
+
     Args:
         session_id: update_my_profile이 발급한 세션 ID
         house_category: 현재 apt(아파트)만 지원. 다른 값은 unsupported_category로 반환한다.

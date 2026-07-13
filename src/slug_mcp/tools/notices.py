@@ -22,6 +22,9 @@ async def search_housing_notices(
 ) -> dict:
     """분양 공고 목록을 검색한다.
 
+    프로필·세션 없이 즉시 조회한다. 단순히 공고 정보를 요청하는 경우(추천이 아님)에는
+    선입력을 요구하지 말고 이 도구를 바로 호출한다.
+
     Args:
         house_category: apt(아파트) | officetel(오피스텔 등) | remainder(무순위/잔여)
         region: 공급지역 시도명으로 좁히기 (예: 서울, 경기). 비우면 전국 대상.

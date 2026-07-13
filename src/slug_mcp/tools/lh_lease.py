@@ -199,6 +199,9 @@ async def search_lease_notices(
     청약홈(odcloud) 공고와 별개로, LH가 직접 공급하는 분양주택·임대주택·토지·상가·
     신혼희망타운 공고를 조회한다. 게시일 기간(start_date~end_date)은 필수다.
 
+    프로필·세션 없이 즉시 조회한다. 임대 공고를 단순히 알려달라는 요청(맞춤추천이 아님)에는
+    선입력을 요구하지 말고 이 도구를 바로 호출한다.
+
     Args:
         start_date: 게시일 검색 시작일 (YYYYMMDD, 예: 20200308)
         end_date: 게시일 검색 종료일 (YYYYMMDD, 예: 20200508)

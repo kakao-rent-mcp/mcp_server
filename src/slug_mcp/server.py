@@ -34,11 +34,19 @@ SERVICE_NAME = "슬러그(Slug)"
 mcp = FastMCP(
     name="slug-mcp",
     instructions=(
-        f"{SERVICE_NAME}: 한국 주택 청약 공고를 검색하고, 사용자의 소득·자산·가족구성·"
+        f"{SERVICE_NAME}: 한국 주택 청약·임대 공고를 검색하고, 사용자의 소득·자산·가족구성·"
         "청약통장 정보로 자격·가점을 판정해 당첨 가능성이 높은 공고를 추천합니다. "
-        "권장 사용 흐름: (1) 대화에서 파악한 사용자 정보를 update_my_profile로 저장하고 "
-        "응답의 next_questions로 부족한 정보를 물어 채운다 → (2) 같은 session_id로 "
-        "analyze_my_subscription(종합 판정) 또는 recommend_housing(공고 추천)을 호출한다. "
+        "먼저 사용자 의도를 두 갈래로 나눠 처리하세요(청약·임대에 동일 적용). "
+        "[조회] '공고 알려줘/보여줘/어떤 게 있어' 등 단순 정보 요청이면 프로필을 묻지 말고 "
+        "즉시 검색하세요 — 청약은 search_housing_notices, 임대는 search_lease_notices를 "
+        "바로 호출합니다(세션·선입력 불필요). "
+        "[맞춤추천] '나한테 맞는/신청 가능한/당첨 가능성 높은' 등 개인 자격 판정이 필요한 "
+        "요청일 때만 (1) 대화에서 파악한 정보를 update_my_profile로 저장하고 응답의 "
+        "next_questions로 부족한 정보를 채운 뒤 → (2) 같은 session_id로 "
+        "analyze_my_subscription(종합 판정) 또는 recommend_housing(공고 추천)을 호출합니다. "
+        "recommend_housing·analyze_my_subscription의 action_items와 headline의 추가 정보 안내는 "
+        "'채우면 더 정확해지는' 선택 사항일 뿐입니다. 결과(신청 가능한 트랙이 없는 경우 포함)를 "
+        "먼저 제시한 뒤, 부족한 정보를 필수 질문처럼 다시 캐묻지 말고 선택적으로만 권하세요. "
         "금액 단위는 모두 원(KRW)이며 필드명에 _krw가 붙습니다. "
         "프로필은 서버 메모리에 24시간만 보관됩니다."
     ),
