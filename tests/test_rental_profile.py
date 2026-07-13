@@ -77,6 +77,17 @@ def test_happy_rental_asks_account_duration_as_core():
     assert "subscription_account.duration_months" in _missing_paths(result)
 
 
+def test_national_and_public_rental_ask_account_duration_as_core():
+    """국민·공공임대는 통장 가입기간이 순위 판정 입력이라 core로 물어야 한다(회귀 방지)."""
+    for rental_type in (RentalType.NATIONAL, RentalType.PUBLIC):
+        result = profile_tools.update_my_profile(
+            target_housing=TargetHousing(track=HousingTrack.RENTAL, rental_type=rental_type)
+        )
+        missing = _missing_paths(result)
+        assert "subscription_account.duration_months" in missing
+        assert "subscription_account.payment_count" in missing
+
+
 def test_sale_track_questions_unchanged_by_rental_feature():
     # track 미지정 = 분양. 기존 분양 core 질문표와 완전히 동일해야 한다(회귀 가드).
     core, _full, _optional = missing_fields({})
