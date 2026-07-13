@@ -262,3 +262,66 @@ def test_public_income_only_applies_upto_60sqm():
     assert _judge_public(income_ratio=130.0, desired_size_sqm=84.0)["eligible"] is True
     # 85㎡ 초과는 공공임대(5·10년) 대상이 아니다.
     assert _judge_public(desired_size_sqm=101.0)["eligible"] is False
+
+
+def _rental_doc(**overrides):
+    """core가 전부 찬 영구임대 기본 문서. overrides는 최상위 키 단위로 deep-merge한다."""
+    doc = {
+        "target_housing": {
+            "track": "rental",
+            "rental_type": "permanent",
+            "target_region": "성남시",
+        },
+        "user_profile": {
+            "age": 40,
+            "residence_area": "경기",
+            "owned_house_count": 0,
+            "income_and_assets": {"monthly_income_krw": 2_000_000},
+            "welfare": {"is_basic_living_recipient": True},
+        },
+        "subscription_account": {},
+    }
+    for key, patch in overrides.items():
+        base = doc.setdefault(key, {})
+        for inner_key, value in patch.items():
+            if isinstance(value, dict) and isinstance(base.get(inner_key), dict):
+                base[inner_key].update(value)
+            else:
+                base[inner_key] = value
+    return doc
+
+
+def test_analyze_rental_needs_more_info_when_core_missing():
+    result = rental_engine.analyze_rental({"target_housing": {"track": "rental"}})
+    assert result["status"] == "needs_more_info"
+    assert result["missing_required_fields"]
+
+
+def test_analyze_rental_permanent_recipient_headline_and_notes():
+    result = rental_engine.analyze_rental(_rental_doc())
+    assert result["status"] == "ok"
+    assert result["judgments"]["permanent"]["rank"] == 1
+    assert result["eligible_types"] == ["permanent"]
+    assert "1순위" in result["headline"]
+    # full(자산 등) 미입력 → 잠정 판정 + 항상 공고문 대조 안내.
+    assert result["confidence"] == "provisional"
+    assert any("extract_lease_notice_text" in n for n in result["verification_notes"])
+
+
+def test_analyze_rental_homeowner_household_is_blocked():
+    result = rental_engine.analyze_rental(_rental_doc(user_profile={"owned_house_count": 1}))
+    assert result["blocking"]["is_homeless_household"] is False
+    assert result["eligible_types"] == []
+    assert result["judgments"]["permanent"]["eligible"] is False
+
+
+def test_analyze_rental_without_type_screens_all_four():
+    doc = _rental_doc(target_housing={"rental_type": None})
+    # 유형 미지정 core에는 rental_type이 포함되어 needs_more_info가 되므로,
+    # 스크리닝 경로는 rental_type만 비운 완성 문서로 직접 검증한다.
+    doc["target_housing"].pop("rental_type")
+    doc["subscription_account"] = {"duration_months": 30, "payment_count": 30}
+    result = rental_engine.analyze_rental(doc)
+    assert result["status"] == "ok"
+    assert set(result["judgments"]) == {"permanent", "national", "happy", "public"}
+    assert "permanent" in result["eligible_types"]  # 수급자라 영구임대는 확실

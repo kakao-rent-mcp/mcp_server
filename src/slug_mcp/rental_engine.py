@@ -7,7 +7,12 @@
 
 from __future__ import annotations
 
+from datetime import date
 from typing import Any
+
+from .engine import _age_from_birth_date, _years_since
+from .models import ProfileDocument, missing_fields
+from .rules import load_rental_rules
 
 # 행복주택 계층 → 자산 상한 키 (한부모는 신혼부부와 동일 상한을 쓴다).
 _HAPPY_ASSET_KEY = {
@@ -432,3 +437,227 @@ def judge_public(
         "basis": "우선공급 통장 요건에는 미달하지만 잔여공급으로 신청할 수 있습니다.",
         "notes": notes,
     }
+
+
+_RENTAL_TYPE_FIELD = "target_housing.rental_type"
+
+
+def analyze_rental(doc: dict[str, Any], as_of: date | None = None) -> dict[str, Any]:
+    """임대 프로필을 판정한다. 유형 미지정이면 4유형 전부 스크리닝한다.
+
+    분양 engine.analyze와 같은 needs_more_info/provisional 철학을 따르되,
+    rental_type 누락만으로는 판정을 막지 않는다(전 유형 스크리닝이 유형 추천 역할).
+    """
+    as_of = as_of or date.today()
+    core_missing, full_missing, optional_missing = missing_fields(doc)
+    blocking_core = [item for item in core_missing if item["field"] != _RENTAL_TYPE_FIELD]
+    if blocking_core:
+        return {
+            "status": "needs_more_info",
+            "missing_required_fields": core_missing,
+            "missing_recommended_fields": full_missing,
+            "missing_optional_fields": optional_missing,
+            "guidance": "잠정 판정에 필요한 core 항목을 채운 뒤 다시 분석하세요. "
+            "update_my_profile로 부분 업데이트할 수 있습니다.",
+        }
+    is_provisional = bool(full_missing) or bool(core_missing)
+
+    profile = ProfileDocument.model_validate(doc)
+    user = profile.user_profile
+    account = profile.subscription_account
+    target = profile.target_housing
+    rules = load_rental_rules()
+
+    action_items: list[str] = []
+    notes: list[str] = []
+
+    derived_age = _age_from_birth_date(user.birth_date, as_of)
+    age = derived_age if derived_age is not None else (user.age or 0)
+    dependents = user.dependents_count or 0
+    household_size = dependents + 1
+    if user.dependents_count is None:
+        action_items.append("부양가족 수를 입력하면 가구원수 기준 소득 상한이 정확해집니다.")
+    income = user.income_and_assets.monthly_income_krw or 0
+    income_ratio = rental_income_ratio_pct(income, household_size, rules)
+    marriage_years = (
+        _years_since(user.marriage.marriage_date, as_of) if user.marriage.marriage_date else None
+    )
+    real_estate = user.income_and_assets.total_real_estate_krw
+    car_value = user.income_and_assets.car_value_krw
+    if real_estate is None:
+        action_items.append("세대 부동산 자산을 입력하면 총자산 상한을 판정합니다.")
+    if car_value is None:
+        action_items.append("자동차 가액을 입력하면 자동차 상한을 판정합니다.")
+
+    # 공통 차단필터: 무주택 세대구성원. 임대는 제53조(60세 이상 직계존속) 예외가 공공임대에
+    # 적용되지 않는 등 분양보다 엄격해, 세대 보유 주택 수로 단순 판정하고 예외는 안내만 한다.
+    owned = user.owned_house_count or 0
+    is_homeless_household = owned == 0
+    disqualifications: list[dict[str, str]] = []
+    if not is_homeless_household:
+        disqualifications.append(
+            {
+                "filter": "homeless_household",
+                "reason": f"세대 보유 주택 {owned}채 — 임대주택은 무주택 세대구성원만 "
+                "신청할 수 있습니다.",
+            }
+        )
+
+    types_to_judge = (
+        [target.rental_type.value]
+        if target.rental_type is not None
+        else ["permanent", "national", "happy", "public"]
+    )
+    if target.rental_type is None:
+        notes.append("임대 유형 미지정 — 4유형 전부를 스크리닝해 신청 가능 유형을 추렸습니다.")
+
+    judgments: dict[str, dict[str, Any]] = {}
+    for rental_type in types_to_judge:
+        judgments[rental_type] = _judge_one(
+            rental_type,
+            is_homeless_household=is_homeless_household,
+            age=age,
+            income_ratio=income_ratio,
+            household_size=household_size,
+            user=user,
+            account=account,
+            target=target,
+            marriage_years=marriage_years,
+            real_estate=real_estate,
+            car_value=car_value,
+            rules=rules,
+        )
+
+    eligible_types = [t for t, j in judgments.items() if j["eligible"]]
+
+    notes.append(
+        "이 판정은 마이홈포털 2026년도 일반 고시 기준의 잠정 판정입니다. 단지별 기준은 "
+        "공고문이 최종이므로 search_lease_notices로 공고를 찾고 extract_lease_notice_text로 "
+        "원문의 소득·자산·순위 기준을 대조하세요."
+    )
+
+    return {
+        "status": "ok",
+        "confidence": "provisional" if is_provisional else "complete",
+        "track": "rental",
+        "rental_type": target.rental_type.value if target.rental_type else None,
+        "headline": _headline(judgments, eligible_types, is_provisional),
+        "blocking": {
+            "is_homeless_household": is_homeless_household,
+            "disqualifications": disqualifications,
+        },
+        "judgments": judgments,
+        "eligible_types": eligible_types,
+        "action_items": action_items,
+        "verification_notes": notes,
+    }
+
+
+def _judge_one(
+    rental_type: str,
+    *,
+    is_homeless_household: bool,
+    age: int,
+    income_ratio: float | None,
+    household_size: int,
+    user: Any,
+    account: Any,
+    target: Any,
+    marriage_years: float | None,
+    real_estate: int | None,
+    car_value: int | None,
+    rules: dict[str, Any],
+) -> dict[str, Any]:
+    """유형 하나를 판정한다: 무주택 → (행복 외) 자산 → 유형별 판정."""
+    if not is_homeless_household:
+        return {
+            "eligible": False,
+            "rank": None,
+            "basis": "무주택 세대구성원 요건 미충족",
+            "notes": [],
+        }
+    if rental_type != "happy":  # 행복주택 자산은 계층별이라 judge_happy 안에서 검사
+        violations = check_assets(rental_type, None, real_estate, car_value, rules)
+        if violations:
+            return {
+                "eligible": False,
+                "rank": None,
+                "basis": "; ".join(v["reason"] for v in violations),
+                "notes": [],
+            }
+    if rental_type == "permanent":
+        return judge_permanent(
+            age=age,
+            income_ratio=income_ratio,
+            household_size=household_size,
+            is_basic_living_recipient=user.welfare.is_basic_living_recipient,
+            is_national_merit=user.welfare.is_national_merit,
+            is_near_poverty=user.welfare.is_near_poverty,
+            is_single_parent=user.is_single_parent,
+            rules=rules,
+        )
+    if rental_type == "national":
+        return judge_national(
+            income_ratio=income_ratio,
+            household_size=household_size,
+            desired_size_sqm=target.desired_size_sqm,
+            account_months=account.duration_months or 0,
+            payment_count=account.payment_count or 0,
+            age=age,
+            dependents_count=user.dependents_count or 0,
+            residence_years=user.residence_years_in_region or 0,
+            children_count=user.children_count or 0,
+            rules=rules,
+        )
+    if rental_type == "happy":
+        return judge_happy(
+            age=age,
+            is_married=user.marriage.is_married,
+            marriage_years=marriage_years,
+            infants_count=user.infants_count or 0,
+            is_single_parent=user.is_single_parent,
+            is_housing_benefit_recipient=user.welfare.is_housing_benefit_recipient,
+            income_ratio=income_ratio,
+            household_size=household_size,
+            is_dual_income=user.income_and_assets.is_dual_income,
+            real_estate_krw=real_estate,
+            car_value_krw=car_value,
+            rules=rules,
+        )
+    return judge_public(
+        income_ratio=income_ratio,
+        household_size=household_size,
+        desired_size_sqm=target.desired_size_sqm,
+        account_months=account.duration_months or 0,
+        payment_count=account.payment_count or 0,
+        target_region=target.target_region or user.residence_area or "",
+        rules=rules,
+    )
+
+
+_TYPE_LABEL = {
+    "permanent": "영구임대",
+    "national": "국민임대",
+    "happy": "행복주택",
+    "public": "공공임대",
+}
+
+
+def _headline(
+    judgments: dict[str, dict[str, Any]], eligible_types: list[str], is_provisional: bool
+) -> str:
+    """한 줄 결론. 분양 엔진의 headline 철학(먼저 결론, 단정 금지)을 따른다."""
+    suffix = " (잠정 — 공고문 확인 필요)" if is_provisional else " (공고문 확인 필요)"
+    if not eligible_types:
+        return "현재 입력 기준으로 신청 가능한 임대 유형이 없습니다" + suffix
+    parts = []
+    for rental_type in eligible_types:
+        judgment = judgments[rental_type]
+        label = _TYPE_LABEL[rental_type]
+        if judgment.get("rank"):
+            parts.append(f"{label} {judgment['rank']}순위")
+        elif judgment.get("tier"):
+            parts.append(f"{label}({judgment['tier']} 계층)")
+        else:
+            parts.append(label)
+    return ", ".join(parts) + " 신청 자격이 있습니다" + suffix
