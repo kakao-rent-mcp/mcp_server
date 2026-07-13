@@ -227,3 +227,38 @@ def test_happy_asset_check_uses_tier_limits():
     # 청년 총자산 상한 2억 5,100만원 초과 → 탈락.
     result = _judge_happy(real_estate_krw=260_000_000)
     assert result["eligible"] is False
+
+
+def _judge_public(**overrides):
+    kwargs = dict(
+        income_ratio=90.0,
+        household_size=4,
+        desired_size_sqm=59.0,
+        account_months=13,
+        payment_count=13,
+        target_region="경기 하남",
+        rules=load_rental_rules(),
+    )
+    kwargs.update(overrides)
+    return rental_engine.judge_public(**kwargs)
+
+
+def test_public_needs_account():
+    result = _judge_public(account_months=0, payment_count=0)
+    assert result["eligible"] is False
+    assert "통장" in result["basis"]
+
+
+def test_public_rank1_differs_by_capital_region():
+    # 수도권(경기)은 12개월·12회, 비수도권(부산)은 6개월·6회가 우선공급 기준.
+    assert _judge_public()["rank"] == 1
+    assert _judge_public(account_months=7, payment_count=7)["rank"] is None  # 수도권 미달 → 잔여
+    assert _judge_public(account_months=7, payment_count=7, target_region="부산")["rank"] == 1
+
+
+def test_public_income_only_applies_upto_60sqm():
+    # 60㎡ 이하만 소득 100% 적용 — 초과 평형은 소득 무관.
+    assert _judge_public(income_ratio=130.0)["eligible"] is False
+    assert _judge_public(income_ratio=130.0, desired_size_sqm=84.0)["eligible"] is True
+    # 85㎡ 초과는 공공임대(5·10년) 대상이 아니다.
+    assert _judge_public(desired_size_sqm=101.0)["eligible"] is False

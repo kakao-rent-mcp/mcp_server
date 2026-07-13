@@ -19,6 +19,9 @@ _HAPPY_ASSET_KEY = {
     "college_student": "college_student",
 }
 
+# 공공임대 수도권 구분을 위한 토큰.
+_CAPITAL_TOKENS = ("서울", "경기", "인천")
+
 
 def rental_income_ratio_pct(
     monthly_income_krw: int, household_size: int, rules: dict[str, Any]
@@ -363,5 +366,69 @@ def judge_happy(
         "tier": None,
         "basis": "해당 계층은 있으나 소득·자산 요건 미충족",
         "max_residency_years": None,
+        "notes": notes,
+    }
+
+
+def judge_public(
+    *,
+    income_ratio: float | None,
+    household_size: int,
+    desired_size_sqm: float | None,
+    account_months: int,
+    payment_count: int,
+    target_region: str,
+    rules: dict[str, Any],
+) -> dict[str, Any]:
+    """공공임대(5·10년 분양전환): 통장 필수 → 60㎡ 이하 소득 100% → 우선/잔여공급."""
+    cfg = rules["public"]
+    notes: list[str] = []
+    if account_months <= 0 and payment_count <= 0:
+        return {
+            "eligible": False,
+            "rank": None,
+            "basis": "공공임대는 청약통장(입주자저축) 가입이 필수입니다.",
+            "notes": notes,
+        }
+    if desired_size_sqm is not None and desired_size_sqm > cfg["max_size_sqm"]:
+        return {
+            "eligible": False,
+            "rank": None,
+            "basis": f"전용 {cfg['max_size_sqm']}㎡ 초과는 공공임대(5·10년) 공급 대상이 아닙니다.",
+            "notes": notes,
+        }
+
+    if desired_size_sqm is None:
+        notes.append("희망 전용면적 미입력 — 60㎡ 이하(소득기준 적용) 기준으로 판정했습니다.")
+    income_applies = desired_size_sqm is None or desired_size_sqm <= 60
+    if income_applies:
+        income_ok = income_within_cap(
+            income_ratio, cfg["income_pct_upto_60sqm"], household_size, rules
+        )
+        if income_ok is False:
+            return {
+                "eligible": False,
+                "rank": None,
+                "basis": "60㎡ 이하 공공임대 소득 상한(100% + 1·2인 가산)을 초과합니다.",
+                "notes": notes,
+            }
+        if income_ok is None:
+            notes.append("소득표 밖(8인 이상 가구 등)이라 소득요건은 공고문으로 확인해야 합니다.")
+
+    is_capital = any(token in target_region for token in _CAPITAL_TOKENS)
+    req = cfg["rank1_account"]["capital" if is_capital else "non_capital"]
+    if account_months >= req["account_months"] and payment_count >= req["payment_count"]:
+        months = req["account_months"]
+        payments = req["payment_count"]
+        return {
+            "eligible": True,
+            "rank": 1,
+            "basis": f"우선공급(통장 {months}개월·{payments}회 이상) 요건 충족",
+            "notes": notes,
+        }
+    return {
+        "eligible": True,
+        "rank": None,
+        "basis": "우선공급 통장 요건에는 미달하지만 잔여공급으로 신청할 수 있습니다.",
         "notes": notes,
     }
