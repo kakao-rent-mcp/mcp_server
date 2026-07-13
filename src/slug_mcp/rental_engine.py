@@ -7,11 +7,7 @@
 
 from __future__ import annotations
 
-from datetime import date
 from typing import Any
-
-from .models import ProfileDocument, missing_fields
-from .rules import load_rental_rules
 
 
 def rental_income_ratio_pct(
