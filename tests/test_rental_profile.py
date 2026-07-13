@@ -106,7 +106,8 @@ def test_filled_rental_profile_guides_to_lease_tools():
     )
     assert result["missing_required_fields"] == []
     assert result["missing_recommended_fields"] == []
-    # 임대는 자동판정 미지원이므로 공고문 원문 대조 도구를 안내한다.
+    # 임대는 analyze_my_rental로 판정하고, 공고문 원문 대조 도구도 함께 안내한다.
+    assert "analyze_my_rental" in result["guidance"]
     assert "extract_lease_notice_text" in result["guidance"]
 
 
@@ -115,9 +116,9 @@ def test_analyze_refuses_rental_track_explicitly():
         target_housing=TargetHousing(track=HousingTrack.RENTAL, rental_type=RentalType.NATIONAL)
     )
     result = analyze_tools.analyze_my_subscription(created["session_id"])
-    # 분양 룰로 오판정하지 않고 명시적으로 미지원을 알린다.
-    assert result["status"] == "rental_not_supported"
-    assert "extract_lease_notice_text" in result["guidance"]
+    # 분양 룰로 오판정하지 않고 전용 도구(analyze_my_rental)로 위임한다.
+    assert result["status"] == "rental_track"
+    assert "analyze_my_rental" in result["guidance"]
 
 
 def test_welfare_has_housing_benefit_field_and_rental_optional_question():

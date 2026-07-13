@@ -32,13 +32,11 @@ def analyze_my_subscription(session_id: str) -> dict[str, Any]:
             "guidance": "세션이 없거나 만료되었습니다(보관 24시간). update_my_profile로 "
             "프로필을 만든 뒤 그 session_id로 다시 호출하세요.",
         }
-    # 임대 트랙은 유형별 기준표가 달라 자동판정을 아직 지원하지 않는다.
-    # 분양 룰로 오판정하는 대신 명시적으로 안내한다.
+    # 임대 트랙은 기준표·판정 구조가 달라 전용 도구로 위임한다.
     if (doc.get("target_housing") or {}).get("track") == "rental":
         return {
-            "status": "rental_not_supported",
-            "guidance": "임대주택 자격 자동판정은 아직 지원하지 않습니다. "
-            "search_lease_notices로 공고를 찾고 extract_lease_notice_text로 공고문 원문의 "
-            "소득·자산·순위 기준을 저장된 프로필(get_my_profile)과 대조해 주세요.",
+            "status": "rental_track",
+            "guidance": "임대주택 자격 판정은 analyze_my_rental을 사용하세요. 공고 검색은 "
+            "search_lease_notices, 공고문 원문 대조는 extract_lease_notice_text입니다.",
         }
     return engine.analyze(doc)

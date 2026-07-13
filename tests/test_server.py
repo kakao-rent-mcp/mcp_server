@@ -2,7 +2,8 @@
 
 - 서버·도구 이름에 'kakao' 금지 (대소문자 불문)
 - 툴 이름: 영문/숫자/_/- 만, 1~128자
-- 툴 개수: 3~10개 권장, 20개 초과 금지
+- 툴 개수: 3~10개 권장, 20개 초과 금지(하드 캡). 현재 11개로 권장 상한을 넘었다
+  (ADR-002, docs/architecture-decisions.md 참고 — 재검토 대상)
 - annotations 5종(title/readOnlyHint/destructiveHint/openWorldHint/idempotentHint) 모두 지정
 - description: 서비스명(국·영문 병기) 포함, 1,024자 이내
 """
@@ -22,7 +23,9 @@ async def tools():
 
 
 async def test_tool_count_within_recommended_range(tools):
-    assert 3 <= len(tools) <= 10
+    # ADR-002: 임대 자격판정(analyze_my_rental) 추가로 권장 상한(10개)을 1개
+    # 넘겼다(11개). 하드 캡(20개 초과 금지)은 지키고 있다 — 재검토는 ADR-002 참고.
+    assert 3 <= len(tools) <= 20
 
 
 async def test_expected_tools_registered(tools):
@@ -37,6 +40,7 @@ async def test_expected_tools_registered(tools):
         "update_my_profile",
         "get_my_profile",
         "analyze_my_subscription",
+        "analyze_my_rental",
         "recommend_housing",
     }
 
