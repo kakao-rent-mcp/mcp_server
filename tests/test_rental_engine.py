@@ -287,6 +287,7 @@ def _rental_doc(**overrides):
             "age": 40,
             "residence_area": "경기",
             "owned_house_count": 0,
+            "dependents_count": 0,
             "income_and_assets": {"monthly_income_krw": 2_000_000},
             "welfare": {"is_basic_living_recipient": True},
         },
@@ -364,3 +365,39 @@ def test_server_registers_analyze_my_rental():
     registered = [fn.__name__ for fn, _, _ in server._TOOLS]
     assert "analyze_my_rental" in registered
     assert "analyze_my_rental" in server.mcp.instructions
+
+
+def test_analyze_rental_national_rank_uses_asked_account_duration():
+    """국민임대 질문 흐름이 묻는 값만으로 1순위가 정확히 나온다(가입기간 미수집 회귀 방지)."""
+    doc = {
+        "target_housing": {
+            "track": "rental",
+            "rental_type": "national",
+            "target_region": "성남시",
+            "desired_size_sqm": 59.0,
+        },
+        "user_profile": {
+            "age": 40,
+            "residence_area": "경기",
+            "owned_house_count": 0,
+            "dependents_count": 2,
+            "income_and_assets": {"monthly_income_krw": 5_000_000},
+            "welfare": {"is_basic_living_recipient": False},
+        },
+        "subscription_account": {"duration_months": 30, "payment_count": 30},
+    }
+    result = rental_engine.analyze_rental(doc)
+    assert result["status"] == "ok"
+    assert result["judgments"]["national"]["rank"] == 1
+
+
+def test_analyze_rental_permanent_large_household_does_not_claim_income_excess():
+    """8인 이상(소득표 밖)은 '소득 초과'가 아니라 '판정 불가'로 답해야 한다."""
+    doc = _rental_doc(
+        user_profile={"dependents_count": 8, "welfare": {"is_basic_living_recipient": False}}
+    )
+    result = rental_engine.analyze_rental(doc)
+    judgment = result["judgments"]["permanent"]
+    assert judgment["eligible"] is False
+    assert "초과" not in judgment["basis"]
+    assert "판정할 수 없" in judgment["basis"]

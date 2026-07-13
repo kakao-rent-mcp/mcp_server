@@ -122,7 +122,16 @@ def judge_permanent(
     if is_basic_living_recipient:
         return {"eligible": True, "rank": 1, "basis": "생계·의료급여 수급자", "notes": notes}
     if is_single_parent:
-        return {"eligible": True, "rank": 1, "basis": "지원대상 한부모가족", "notes": notes}
+        notes.append(
+            "영구임대 1순위인 '지원대상 한부모가족'은 한부모가족지원법상 지원대상(소득요건 "
+            "있음)이어야 합니다 — 해당 여부는 공고문·주민센터에서 확인하세요."
+        )
+        return {
+            "eligible": True,
+            "rank": 1,
+            "basis": "한부모가족(지원대상 여부 확인 필요)",
+            "notes": notes,
+        }
     merit_ok = income_within_cap(
         income_ratio, cfg["rank1"]["national_merit_income_pct"], household_size, rules
     )
@@ -141,6 +150,14 @@ def judge_permanent(
             "(+20/+10%p)을 적용했습니다 — 공고문 기준을 확인하세요."
         )
         return {"eligible": True, "rank": 2, "basis": "소득 50% 이하(가산 반영)", "notes": notes}
+    if income_ratio is None:
+        notes.append("소득표 밖(8인 이상 가구 등)이라 소득요건은 공고문으로 확인해야 합니다.")
+        return {
+            "eligible": False,
+            "rank": None,
+            "basis": "수급·한부모·유공자 자격이 없고 소득요건은 판정할 수 없습니다(소득표 밖).",
+            "notes": notes,
+        }
     return {
         "eligible": False,
         "rank": None,

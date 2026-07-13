@@ -95,6 +95,7 @@ def test_filled_rental_profile_guides_to_lease_tools():
             residence_area="경기",
             residence_years_in_region=5,
             owned_house_count=0,
+            dependents_count=0,
             is_single_household=True,
             welfare=WelfareStatus(is_basic_living_recipient=True),
             income_and_assets=IncomeAssets(
