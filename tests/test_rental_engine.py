@@ -39,3 +39,25 @@ def test_income_within_cap_applies_small_household_bonus():
     # 상한 없음(행복주택 수급자 계층 등) / 소득표 밖 → 판정 불가 None.
     assert rental_engine.income_within_cap(ratio, None, 1, rules) is None
     assert rental_engine.income_within_cap(None, 70, 1, rules) is None
+
+
+def test_check_assets_blocks_over_limit_and_reports_reason():
+    rules = load_rental_rules()
+    # 국민임대 총자산 상한 3억 4,500만원: 부동산만으로 초과하면 확정 탈락.
+    violations = rental_engine.check_assets("national", None, 400_000_000, None, rules)
+    assert [v["filter"] for v in violations] == ["asset"]
+    # 자동차 4,542만원 초과.
+    violations = rental_engine.check_assets("national", None, None, 50_000_000, rules)
+    assert [v["filter"] for v in violations] == ["vehicle"]
+    # 공공임대는 총자산이 아니라 부동산 상한(2억 1,550만원)을 쓴다.
+    assert rental_engine.check_assets("public", None, 300_000_000, None, rules)
+    assert not rental_engine.check_assets("public", None, 200_000_000, 40_000_000, rules)
+
+
+def test_check_assets_happy_uses_tier_limits():
+    rules = load_rental_rules()
+    # 청년 계층 총자산 2억 5,100만원 — 신혼(3억 4,500만원)보다 낮다.
+    assert rental_engine.check_assets("happy", "youth", 300_000_000, None, rules)
+    assert not rental_engine.check_assets("happy", "newlywed", 300_000_000, None, rules)
+    # 대학생 계층은 자동차 소유 불가(vehicle: 0).
+    assert rental_engine.check_assets("happy", "college_student", None, 1_000_000, rules)
