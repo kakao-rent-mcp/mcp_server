@@ -91,3 +91,51 @@ def check_assets(
         )
         violations.append({"filter": "vehicle", "reason": reason})
     return violations
+
+
+def judge_permanent(
+    *,
+    age: int,
+    income_ratio: float | None,
+    household_size: int,
+    is_basic_living_recipient: bool | None,
+    is_national_merit: bool | None,
+    is_near_poverty: bool | None,
+    is_single_parent: bool,
+    rules: dict[str, Any],
+) -> dict[str, Any]:
+    """영구임대 순위 판정 — 수급자 중심 순위제, 청약통장 불필요.
+
+    프로필로 판정 가능한 1순위 자격만 본다. 북한이탈주민 등 필드가 없는 카테고리는
+    스펙의 '뺀 것' — 해당자는 공고문 대조를 안내한다 (orchestrator의 공통 노트).
+    """
+    cfg = rules["permanent"]
+    notes: list[str] = []
+    if is_basic_living_recipient:
+        return {"eligible": True, "rank": 1, "basis": "생계·의료급여 수급자", "notes": notes}
+    if is_single_parent:
+        return {"eligible": True, "rank": 1, "basis": "지원대상 한부모가족", "notes": notes}
+    merit_ok = income_within_cap(
+        income_ratio, cfg["rank1"]["national_merit_income_pct"], household_size, rules
+    )
+    if is_national_merit and merit_ok:
+        return {"eligible": True, "rank": 1, "basis": "국가유공자(소득 70% 이하)", "notes": notes}
+    if is_near_poverty and age >= 65:
+        return {
+            "eligible": True,
+            "rank": 1,
+            "basis": "만 65세 이상 수급권자·차상위",
+            "notes": notes,
+        }
+    if income_within_cap(income_ratio, cfg["rank2"]["income_pct"], household_size, rules):
+        notes.append(
+            "영구임대 2순위의 1·2인 가구 소득 가산은 고시 표기가 엇갈려 공통 가산"
+            "(+20/+10%p)을 적용했습니다 — 공고문 기준을 확인하세요."
+        )
+        return {"eligible": True, "rank": 2, "basis": "소득 50% 이하(가산 반영)", "notes": notes}
+    return {
+        "eligible": False,
+        "rank": None,
+        "basis": "수급·한부모·유공자 자격이 없고 소득이 2순위 상한을 초과합니다.",
+        "notes": notes,
+    }

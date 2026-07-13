@@ -61,3 +61,36 @@ def test_check_assets_happy_uses_tier_limits():
     assert not rental_engine.check_assets("happy", "newlywed", 300_000_000, None, rules)
     # 대학생 계층은 자동차 소유 불가(vehicle: 0).
     assert rental_engine.check_assets("happy", "college_student", None, 1_000_000, rules)
+
+
+def _judge_permanent(**overrides):
+    kwargs = dict(
+        age=40,
+        income_ratio=52.0,
+        household_size=1,
+        is_basic_living_recipient=False,
+        is_national_merit=False,
+        is_near_poverty=False,
+        is_single_parent=False,
+        rules=load_rental_rules(),
+    )
+    kwargs.update(overrides)
+    return rental_engine.judge_permanent(**kwargs)
+
+
+def test_permanent_recipient_is_rank1():
+    result = _judge_permanent(is_basic_living_recipient=True)
+    assert (result["eligible"], result["rank"]) == (True, 1)
+    assert "수급자" in result["basis"]
+
+
+def test_permanent_income_under_50pct_is_rank2_with_bonus_note():
+    # 1인 가구 소득 52% — 50% 초과지만 1인 가산(+20%p)으로 2순위 충족.
+    result = _judge_permanent()
+    assert (result["eligible"], result["rank"]) == (True, 2)
+    assert any("공고문" in note for note in result["notes"])  # 가산 요검증 안내
+
+
+def test_permanent_over_income_without_priority_is_ineligible():
+    result = _judge_permanent(income_ratio=95.0)
+    assert (result["eligible"], result["rank"]) == (False, None)
