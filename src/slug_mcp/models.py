@@ -89,6 +89,9 @@ class WelfareStatus(BaseModel):
         default=None, description="생계급여 또는 의료급여 수급자 여부 (영구임대 1순위 근거)"
     )
     is_near_poverty: bool | None = Field(default=None, description="차상위계층 여부")
+    is_housing_benefit_recipient: bool | None = Field(
+        default=None, description="주거급여 수급자 여부 (행복주택 주거급여수급자 계층 판단)"
+    )
     is_national_merit: bool | None = Field(
         default=None, description="국가유공자·보훈보상대상자(유족 포함) 여부"
     )
@@ -416,6 +419,9 @@ RENTAL_FULL_FIELD_QUESTIONS: dict[str, str] = {
 
 RENTAL_OPTIONAL_FIELD_QUESTIONS: dict[str, str] = {
     "user_profile.welfare.is_near_poverty": "차상위계층에 해당하시나요?",
+    "user_profile.welfare.is_housing_benefit_recipient": (
+        "주거급여를 받고 계신가요? (행복주택 주거급여수급자 계층 — 소득기준 없이 신청 가능)"
+    ),
     "user_profile.welfare.is_national_merit": (
         "국가유공자·보훈보상대상자(유족 포함)에 해당하시나요? (임대 순위·기관추천에 반영)"
     ),

@@ -118,3 +118,10 @@ def test_analyze_refuses_rental_track_explicitly():
     # 분양 룰로 오판정하지 않고 명시적으로 미지원을 알린다.
     assert result["status"] == "rental_not_supported"
     assert "extract_lease_notice_text" in result["guidance"]
+
+
+def test_welfare_has_housing_benefit_field_and_rental_optional_question():
+    from slug_mcp.models import RENTAL_OPTIONAL_FIELD_QUESTIONS
+
+    assert WelfareStatus(is_housing_benefit_recipient=True).is_housing_benefit_recipient is True
+    assert "user_profile.welfare.is_housing_benefit_recipient" in RENTAL_OPTIONAL_FIELD_QUESTIONS
