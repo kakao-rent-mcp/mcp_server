@@ -214,12 +214,12 @@ async def test_recommend_regates_regulated_notice_per_location():
 
     result = await recommend.recommend_housing(session_id, max_candidates_to_scan=5)
 
-    ids = [rec["notice"]["HOUSE_MANAGE_NO"] for rec in result["recommendations"]]
+    ids = [rec["notice"]["id"] for rec in result["recommendations"]]
     assert "GOYANG" in ids  # 비규제 → 세대원도 1순위 가능
     assert "DONGTAN" not in ids  # 규제 → 세대주 아니면 1순위 불가 → 제외
     assert result["skipped_ineligible_count"] == 1
     goyang = result["recommendations"][0]
-    assert goyang["notice"]["HOUSE_MANAGE_NO"] == "GOYANG"
+    assert goyang["notice"]["id"] == "GOYANG"
     assert goyang["regulated_region"] is False
 
 
@@ -245,7 +245,7 @@ async def test_recommend_attaches_comparable_competition():
     assert result["comparable_pool_notices"] == 1  # 마감 PAST1은 비교군으로만
     assert len(result["recommendations"]) == 1
     top = result["recommendations"][0]
-    assert top["notice"]["HOUSE_MANAGE_NO"] == "OPEN1"
+    assert top["notice"]["id"] == "OPEN1"
     assert top["track"] == "public"
     assert top["application_status"] == "접수전"
     assert top["supply_households"] == 1200
@@ -332,7 +332,7 @@ async def test_recommend_ranks_easier_competition_first():
 
     result = await recommend.recommend_housing(session_id, max_candidates_to_scan=5, top_n=3)
 
-    order = [rec["notice"]["HOUSE_MANAGE_NO"] for rec in result["recommendations"]]
+    order = [rec["notice"]["id"] for rec in result["recommendations"]]
     assert order == ["EASY", "HARD"]  # 용인시(경쟁률 1) < 고양시(경쟁률 10)
 
 

@@ -27,7 +27,10 @@ async def test_search_housing_notices_apt():
     assert route.called
     called_params = route.calls[0].request.url.params
     assert called_params["cond[SUBSCRPT_AREA_CODE_NM::EQ]"] == "경기"
-    assert result["data"][0]["HOUSE_NM"] == "고양창릉 S-4블록 공공분양주택(본청약)"
+    assert result["notices"][0]["name"] == "고양창릉 S-4블록 공공분양주택(본청약)"
+    assert result["notices"][0]["id"] == "2026000320"
+    # 원본 코드필드는 정제되어 노출되지 않는다.
+    assert "HOUSE_NM" not in result["notices"][0]
 
 
 @respx.mock
