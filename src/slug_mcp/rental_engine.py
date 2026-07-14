@@ -549,8 +549,8 @@ def analyze_rental(doc: dict[str, Any], as_of: date | None = None) -> dict[str, 
 
     notes.append(
         "이 판정은 마이홈포털 2026년도 일반 고시 기준의 잠정 판정입니다. 단지별 기준은 "
-        "공고문이 최종이므로 search_lease_notices로 공고를 찾고 extract_lease_notice_text로 "
-        "원문의 소득·자산·순위 기준을 대조하세요."
+        "공고문이 최종이므로 search_lease_notices로 공고를 찾고, 결과의 detail_url"
+        "(LH 청약센터 공고 페이지) 공고문 원문에서 소득·자산·순위 기준을 대조하세요."
     )
 
     return {

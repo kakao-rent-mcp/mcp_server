@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 
 import httpx
+import pytest
 import respx
 
 from slug_mcp.models import LhNoticeType
@@ -12,7 +13,6 @@ from slug_mcp.tools import lh_lease
 FIXTURES = Path(__file__).parent / "fixtures"
 
 _LIST_URL = "https://apis.data.go.kr/B552555/lhLeaseNoticeInfo1/lhLeaseNoticeInfo1"
-_DETAIL_URL = "https://apis.data.go.kr/B552555/lhLeaseNoticeDtlInfo1/getLeaseNoticeDtlInfo1"
 
 
 def _load(name: str) -> object:
@@ -48,112 +48,20 @@ async def test_search_lease_notices_sends_params_and_parses_header():
     assert result["notices"][0]["type"] == "분양주택"
     # 원본 코드필드는 정제되어 노출되지 않는다.
     assert "PAN_ID" not in result["notices"][0]
+    # 상세조회 도구 제거로 LH-내부 체이닝 코드필드도 더 이상 노출하지 않는다.
+    for dead in ("supply_info_type", "upper_type_code", "system_div_code", "detail_type_code"):
+        assert dead not in result["notices"][0]
+    # 공고문·상세는 detail_url로 안내하므로 링크는 남긴다.
+    assert result["notices"][0]["detail_url"].startswith("http")
 
 
-@respx.mock
-async def test_get_lease_notice_detail_groups_datasets_and_attachments():
-    respx.get(_DETAIL_URL).mock(
-        return_value=httpx.Response(200, json=_load("lh_lease_notice_detail.json"))
-    )
-
-    result = await lh_lease.get_lease_notice_detail(
-        notice_id="0000059187",
-        supply_info_type="050",
-        upper_type_code="05",
-    )
-
-    assert "dsSupInfo" in result["datasets"]
-    assert result["datasets"]["dsSupInfo"][0]["SPL_HHLD_CO"] == "120"
-    # 라벨 행(AHFL_URL='다운로드')은 제외되고 실제 파일 2건만 남는다
-    assert len(result["attachments"]) == 2
-    assert all(a["url"].startswith("http") for a in result["attachments"])
-
-
-def test_find_attachments_skips_label_rows():
-    data = [
-        {
-            "dsAhflInfo": [
-                {
-                    "SL_PAN_AHFL_DS_CD_NM": "공고문",
-                    "CMN_AHFL_NM": "다운로드",
-                    "AHFL_URL": "다운로드",
-                },
-                {
-                    "SL_PAN_AHFL_DS_CD_NM": "공고문 PDF",
-                    "CMN_AHFL_NM": "n.pdf",
-                    "AHFL_URL": "http://x/n.pdf",
-                },
-            ]
-        }
-    ]
-    items = lh_lease.find_attachments(data)
-    assert len(items) == 1
-    assert items[0]["name"] == "n.pdf"
-
-
-def test_pick_notice_pdf_prefers_notice_pdf():
-    attachments = [
-        {"type": "안내문 HWP", "name": "guide.hwp", "url": "http://x/guide.hwp"},
-        {"type": "공고문 PDF", "name": "공고문.pdf", "url": "http://x/notice.pdf"},
-    ]
-    assert lh_lease.pick_notice_pdf(attachments)["url"] == "http://x/notice.pdf"
-    assert lh_lease.pick_notice_pdf([]) is None
-
-
-def test_pick_notice_pdf_trusts_real_extension_over_type_label():
-    # LH 실데이터: 타입 라벨과 실제 확장자가 뒤바뀐 경우 → 실제 .pdf를 골라야 한다
-    attachments = [
-        {"type": "공고문(PDF)", "name": "모집공고문.hwp", "url": "http://x/a.hwp"},
-        {"type": "공고문(hwp)", "name": "모집공고문.pdf", "url": "http://x/b.pdf"},
-    ]
-    assert lh_lease.pick_notice_pdf(attachments)["url"] == "http://x/b.pdf"
-
-
-@respx.mock
-async def test_extract_lease_notice_text_downloads_and_extracts(monkeypatch):
-    respx.get(_DETAIL_URL).mock(
-        return_value=httpx.Response(200, json=_load("lh_lease_notice_detail.json"))
-    )
-    respx.get("http://download.example/notice.pdf").mock(
-        return_value=httpx.Response(200, content=b"%PDF-1.4 fake bytes")
-    )
-    # PyMuPDF 실호출 없이 추출 단계만 스텁으로 대체
-    monkeypatch.setattr(
-        lh_lease, "_extract_pdf_text", lambda data, dedup=True: "공고문 본문 텍스트"
-    )
-
-    result = await lh_lease.extract_lease_notice_text(
-        notice_id="0000059187",
-        supply_info_type="050",
-        upper_type_code="05",
-    )
-
-    assert result["selected"]["url"] == "http://download.example/notice.pdf"
-    assert result["text"] == "공고문 본문 텍스트"
-    assert result["byte_size"] == len(b"%PDF-1.4 fake bytes")
-
-
-@respx.mock
-async def test_extract_lease_notice_text_without_pdf_returns_message():
-    detail = [
-        {
-            "dsAhflInfo": [
-                {
-                    "SL_PAN_AHFL_DS_CD_NM": "안내문 HWP",
-                    "CMN_AHFL_NM": "guide.hwp",
-                    "AHFL_URL": "http://download.example/guide.hwp",
-                }
-            ]
-        }
-    ]
-    respx.get(_DETAIL_URL).mock(return_value=httpx.Response(200, json=detail))
-
-    result = await lh_lease.extract_lease_notice_text(
-        notice_id="0000059187",
-        supply_info_type="050",
-        upper_type_code="05",
-    )
-
-    assert result["selected"] is None
-    assert result["text"] is None
-    assert "찾지 못" in result["message"]
+def test_notice_type_accepts_korean_labels():
+    # 클라이언트 AI가 설명의 한글 라벨을 그대로 넘겨도 해당 enum으로 수용한다(_missing_).
+    assert LhNoticeType("분양주택") is LhNoticeType.SALE_HOUSE
+    assert LhNoticeType("임대주택") is LhNoticeType.LEASE_HOUSE
+    assert LhNoticeType(" 주거복지 ") is LhNoticeType.HOUSING_WELFARE  # 공백도 허용
+    # 정규 영문 슬러그는 그대로 통과한다.
+    assert LhNoticeType("sale_house") is LhNoticeType.SALE_HOUSE
+    # 매핑에 없는 값은 여전히 검증 실패(오탐 방지).
+    with pytest.raises(ValueError):
+        LhNoticeType("없는유형")

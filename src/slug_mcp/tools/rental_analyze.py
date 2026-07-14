@@ -18,8 +18,8 @@ def analyze_my_rental(session_id: str) -> dict[str, Any]:
 
     기준은 마이홈포털 2026년도 일반 고시 기준의 참고 기준선(잠정 판정)이며, 단지별
     기준은 공고문이 최종이다 — 결과의 verification_notes에 따라 search_lease_notices로
-    공고를 찾고 extract_lease_notice_text로 원문을 대조한다. 무엇을 더 입력하면
-    정확해지는지는 action_items로, 한 줄 결론은 headline로 함께 준다.
+    공고를 찾고 결과의 detail_url(LH 청약센터 공고 페이지) 공고문 원문을 대조한다. 무엇을 더
+    입력하면 정확해지는지는 action_items로, 한 줄 결론은 headline로 함께 준다.
 
     Args:
         session_id: update_my_profile이 발급한 세션 ID (target_housing.track='rental' 필요)

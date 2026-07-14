@@ -29,6 +29,10 @@ class LhNoticeType(StrEnum):
 
     HouseCategory와 같은 관례로, 값은 의미어이고 실제 API 코드(UPP_AIS_TP_CD)로의
     변환은 도구 계층(tools/lh_lease.py)에서 한다.
+
+    스키마 enum은 영문 슬러그(land 등)만 노출하지만, 클라이언트 AI가 설명의 한글
+    라벨(분양주택 등)을 그대로 넘기는 실수가 잦아 _missing_으로 한글도 수용한다
+    (설명에 영문·한글을 병기해도 자연어 라벨로 흘러들어오는 경우가 있다).
     """
 
     LAND = "land"  # 토지
@@ -37,6 +41,20 @@ class LhNoticeType(StrEnum):
     HOUSING_WELFARE = "housing_welfare"  # 주거복지
     STORE = "store"  # 상가
     NEWLYWED_HOPE = "newlywed_hope"  # 신혼희망타운
+
+    @classmethod
+    def _missing_(cls, value: object) -> LhNoticeType | None:
+        """한글 공고유형 라벨을 대응 멤버로 매핑한다. 못 찾으면 None(→검증 실패)."""
+        if not isinstance(value, str):
+            return None
+        return {
+            "토지": cls.LAND,
+            "분양주택": cls.SALE_HOUSE,
+            "임대주택": cls.LEASE_HOUSE,
+            "주거복지": cls.HOUSING_WELFARE,
+            "상가": cls.STORE,
+            "신혼희망타운": cls.NEWLYWED_HOPE,
+        }.get(value.strip())
 
 
 # LH 공고 지역코드(CNP_CD)는 행정표준 시도 코드를 따른다. 도구는 사용자가

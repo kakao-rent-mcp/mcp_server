@@ -2,8 +2,8 @@
 
 - 서버·도구 이름에 'kakao' 금지 (대소문자 불문)
 - 툴 이름: 영문/숫자/_/- 만, 1~128자
-- 툴 개수: 3~10개 권장, 20개 초과 금지(하드 캡). 현재 11개로 권장 상한을 넘었다
-  (ADR-002, docs/architecture-decisions.md 참고 — 재검토 대상)
+- 툴 개수: 3~10개 권장, 20개 초과 금지(하드 캡). 현재 9개로 권장 범위 안이다
+  (LH 상세조회/공고문 추출 도구는 상세 API 403 문제로 제거 — ADR-002 참고)
 - annotations 5종(title/readOnlyHint/destructiveHint/openWorldHint/idempotentHint) 모두 지정
 - description: 서비스명(국·영문 병기) 포함, 1,024자 이내
 """
@@ -23,8 +23,8 @@ async def tools():
 
 
 async def test_tool_count_within_recommended_range(tools):
-    # ADR-002: 임대 자격판정(analyze_my_rental) 추가로 권장 상한(10개)을 1개
-    # 넘겼다(11개). 하드 캡(20개 초과 금지)은 지키고 있다 — 재검토는 ADR-002 참고.
+    # 현재 9개 — PlayMCP 권장 범위(3~10개) 안. LH 상세조회/공고문 추출 도구를
+    # 상세 API(lhLeaseNoticeDtlInfo1) 403 문제로 제거하면서 11개 → 9개가 됐다.
     assert 3 <= len(tools) <= 20
 
 
@@ -34,8 +34,6 @@ async def test_expected_tools_registered(tools):
         "search_housing_notices",
         "get_notice_detail",
         "search_lease_notices",
-        "get_lease_notice_detail",
-        "extract_lease_notice_text",
         "get_competition_stats",
         "update_my_profile",
         "get_my_profile",

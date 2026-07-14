@@ -45,7 +45,8 @@ def _profile_status(session_id: str, doc: dict[str, Any]) -> dict[str, Any]:
         guidance = (
             "임대 프로필이 준비됐습니다. 이 session_id로 analyze_my_rental을 호출해 "
             "자격·순위를 판정하세요(참고 기준선의 잠정 판정). search_lease_notices로 공고를 "
-            "찾고 extract_lease_notice_text로 공고문 원문의 소득·자산 기준과 대조해 주세요."
+            "찾고, 결과의 detail_url(LH 청약센터 공고 페이지) 공고문 원문에서 소득·자산 기준을 "
+            "대조해 주세요."
         )
     elif full:
         guidance = (

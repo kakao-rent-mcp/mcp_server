@@ -317,7 +317,8 @@ def test_analyze_rental_permanent_recipient_headline_and_notes():
     assert "1순위" in result["headline"]
     # full(자산 등) 미입력 → 잠정 판정 + 항상 공고문 대조 안내.
     assert result["confidence"] == "provisional"
-    assert any("extract_lease_notice_text" in n for n in result["verification_notes"])
+    assert any("search_lease_notices" in n for n in result["verification_notes"])
+    assert any("detail_url" in n for n in result["verification_notes"])
 
 
 def test_analyze_rental_homeowner_household_is_blocked():
