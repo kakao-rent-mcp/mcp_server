@@ -16,6 +16,8 @@ from .. import store as store_module
 from ..models import HouseCategory
 from . import competition as competition_tools
 from . import notices as notices_tools
+from ._errors import refine_errors
+from ._projection import NOTICE_CARD_FIELDS, project
 
 _KST = timezone(timedelta(hours=9))
 
@@ -286,6 +288,7 @@ def _build_winning_score(
     }
 
 
+@refine_errors
 async def recommend_housing(
     session_id: str,
     house_category: HouseCategory = HouseCategory.APT,
@@ -355,7 +358,8 @@ async def recommend_housing(
         return elig_cache[regulated]
 
     # 시도 공고를 넉넉히 조회한다 — 최신순이라 위쪽=진행/예정, 아래쪽=비교용 과거 공고.
-    search_result = await notices_tools.search_housing_notices(
+    # 내부 판정은 원본 컬럼(HSSPLY_ADRES 등)이 필요하므로 원본 fetch를 쓴다(정제 X).
+    search_result = await notices_tools.fetch_housing_notices(
         house_category=house_category,
         region=_sido_of(region),
         per_page=max(max_candidates_to_scan, _COMPARABLE_POOL_SIZE),
@@ -447,7 +451,7 @@ async def recommend_housing(
         has_comparable = key is not None and key in comparable_index
         regulated = engine.is_regulated_region(notice.get("HSSPLY_ADRES") or region)
         rec: dict[str, Any] = {
-            "notice": notice,
+            "notice": project(notice, NOTICE_CARD_FIELDS),
             "track": track,
             "application_status": _application_status(notice, today),
             "regulated_region": regulated,

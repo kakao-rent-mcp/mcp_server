@@ -27,7 +27,10 @@ async def test_search_housing_notices_apt():
     assert route.called
     called_params = route.calls[0].request.url.params
     assert called_params["cond[SUBSCRPT_AREA_CODE_NM::EQ]"] == "경기"
-    assert result["data"][0]["HOUSE_NM"] == "고양창릉 S-4블록 공공분양주택(본청약)"
+    assert result["notices"][0]["name"] == "고양창릉 S-4블록 공공분양주택(본청약)"
+    assert result["notices"][0]["id"] == "2026000320"
+    # 원본 코드필드는 정제되어 노출되지 않는다.
+    assert "HOUSE_NM" not in result["notices"][0]
 
 
 @respx.mock
@@ -41,5 +44,7 @@ async def test_get_notice_detail_combines_detail_and_unit_types():
 
     result = await notices.get_notice_detail("2026000320")
 
-    assert result["notice"][0]["HOUSE_MANAGE_NO"] == "2026000320"
-    assert result["unit_types"][0]["LTTOT_TOP_AMOUNT"] == "50724"
+    assert result["notice"]["id"] == "2026000320"
+    assert result["unit_types"][0]["top_price"] == "50724"
+    # 원본 코드필드는 정제되어 노출되지 않는다.
+    assert "HOUSE_MANAGE_NO" not in result["notice"]
