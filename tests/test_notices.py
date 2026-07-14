@@ -44,5 +44,7 @@ async def test_get_notice_detail_combines_detail_and_unit_types():
 
     result = await notices.get_notice_detail("2026000320")
 
-    assert result["notice"][0]["HOUSE_MANAGE_NO"] == "2026000320"
-    assert result["unit_types"][0]["LTTOT_TOP_AMOUNT"] == "50724"
+    assert result["notice"]["id"] == "2026000320"
+    assert result["unit_types"][0]["top_price"] == "50724"
+    # 원본 코드필드는 정제되어 노출되지 않는다.
+    assert "HOUSE_MANAGE_NO" not in result["notice"]

@@ -5,15 +5,18 @@ from __future__ import annotations
 import asyncio
 
 from ..clients import odcloud
+from ._projection import COMPETITION_FIELDS, SCORE_FIELDS, project
 
 
 async def get_competition_stats(house_manage_no: str) -> dict:
     """공고의 순위별 경쟁률, 당첨 가점, 특별공급 신청현황을 함께 조회한다.
 
     세 조회는 서로 독립적이므로 순차로 기다리지 않고 동시에 부른다(왕복 대기 1/3).
+    competition은 house_type·rank·residence·competition_rate 등, winning_scores는
+    house_type·lowest/average/top_score로 정제해 돌려준다(원본 코드필드 제외).
 
     Args:
-        house_manage_no: 공고의 주택관리번호
+        house_manage_no: 공고의 주택관리번호 (search_housing_notices 결과의 id)
     """
     cond: dict[str, str | int] = {"cond[HOUSE_MANAGE_NO::EQ]": house_manage_no, "perPage": 50}
     competition, winning_scores, special_supply = await asyncio.gather(
@@ -22,8 +25,10 @@ async def get_competition_stats(house_manage_no: str) -> dict:
         odcloud.get("ApplyhomeInfoCmpetRtSvc", "getAPTSpsplyReqstStus", **cond),
     )
     return {
-        "competition": competition.get("data", []),
-        "winning_scores": winning_scores.get("data", []),
+        "competition": [project(row, COMPETITION_FIELDS) for row in competition.get("data", [])],
+        "winning_scores": [project(row, SCORE_FIELDS) for row in winning_scores.get("data", [])],
+        # 특별공급(34필드, {지역}_{유형}_CNT 코드 조합)은 전용 변환이 필요해 후속 배치로
+        # 미룬다. 현재는 원본 유지 — docs/result-refinement-audit.md 참고.
         "special_supply": special_supply.get("data", []),
     }
 

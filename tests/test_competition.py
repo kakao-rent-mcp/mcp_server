@@ -30,7 +30,10 @@ async def test_get_competition_stats():
 
     result = await competition.get_competition_stats("2026000273")
 
-    assert result["competition"][0]["CMPET_RATE"] == "3.79"
+    assert result["competition"][0]["competition_rate"] == "3.79"
+    assert result["competition"][0]["residence"] == "해당지역"
+    assert "CMPET_RATE" not in result["competition"][0]  # 원본 코드필드 미노출
+    # 특별공급(special_supply)은 후속 배치까지 원본 유지 — raw 필드가 그대로 있어야 정상.
     assert result["special_supply"][0]["SPSPLY_HSHLDCO"] == 10
     assert result["winning_scores"] == []
 

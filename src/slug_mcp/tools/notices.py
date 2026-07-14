@@ -6,7 +6,7 @@ import asyncio
 
 from ..clients import odcloud
 from ..models import HouseCategory
-from ._projection import NOTICE_LIST_FIELDS, project
+from ._projection import NOTICE_LIST_FIELDS, UNIT_TYPE_FIELDS, project
 
 _DETAIL_OPERATION_BY_CATEGORY: dict[HouseCategory, str] = {
     HouseCategory.APT: "getAPTLttotPblancDetail",
@@ -64,6 +64,9 @@ async def search_housing_notices(
 async def get_notice_detail(house_manage_no: str) -> dict:
     """APT 공고 하나의 상세정보와 주택형별(평형별) 분양가·면적을 함께 조회한다.
 
+    반환: {notice(단일 공고 정보), unit_types[...](주택형별 house_type·supply_area·
+    general/special_households·top_price)}. 원본 코드필드는 제외하고 필요한 필드만 담는다.
+
     Args:
         house_manage_no: 공고의 주택관리번호 (search_housing_notices 결과의 id)
     """
@@ -74,7 +77,8 @@ async def get_notice_detail(house_manage_no: str) -> dict:
         odcloud.get("ApplyhomeInfoDetailSvc", "getAPTLttotPblancDetail", **cond),
         odcloud.get("ApplyhomeInfoDetailSvc", "getAPTLttotPblancMdl", **cond_mdl),
     )
+    detail_rows = detail.get("data", [])
     return {
-        "notice": detail.get("data", []),
-        "unit_types": unit_types.get("data", []),
+        "notice": project(detail_rows[0], NOTICE_LIST_FIELDS) if detail_rows else None,
+        "unit_types": [project(row, UNIT_TYPE_FIELDS) for row in unit_types.get("data", [])],
     }

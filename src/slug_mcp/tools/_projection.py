@@ -71,3 +71,32 @@ NOTICE_CARD_FIELDS: list[Field] = [
     ("MVN_PREARNGE_YM", "move_in_month"),
     ("PBLANC_URL", "detail_url"),
 ]
+
+# 분양공고 주택형별(평형별) 분양가·면적 행 → 정제 (get_notice_detail 의 unit_types)
+UNIT_TYPE_FIELDS: list[Field] = [
+    ("HOUSE_TY", "house_type"),  # 주택형 (예: 084.9800A)
+    ("SUPLY_AR", "supply_area"),  # 공급면적(㎡)
+    ("SUPLY_HSHLDCO", "general_households", to_int),  # 일반공급 세대수
+    ("SPSPLY_HSHLDCO", "special_households", to_int),  # 특별공급 세대수
+    ("LTTOT_TOP_AMOUNT", "top_price"),  # 분양가 최고액(만원 단위 문자열)
+]
+
+# 순위별 경쟁률 행 → 정제 (get_competition_stats 의 competition)
+COMPETITION_FIELDS: list[Field] = [
+    ("HOUSE_TY", "house_type"),
+    ("SUBSCRPT_RANK_CODE", "rank"),  # 청약순위
+    ("RESIDE_SENM", "residence"),  # 거주지역명 (해당지역/기타 등)
+    ("SUPLY_HSHLDCO", "supply_households", to_int),
+    ("REQ_CNT", "applicant_count", to_int),  # 접수건수(청약자수)
+    ("CMPET_RATE", "competition_rate"),  # 경쟁률 (미달은 '(△..)' 문자열이라 캐스팅 X)
+]
+
+# 주택형별 당첨가점 행 → 정제 (get_competition_stats 의 winning_scores)
+# 가점값은 '-'(미집계)·'0'(미달/추첨) 의미를 보존하려 문자열 그대로 둔다.
+SCORE_FIELDS: list[Field] = [
+    ("HOUSE_TY", "house_type"),
+    ("RESIDE_SENM", "residence"),
+    ("LWET_SCORE", "lowest_score"),  # 최저 당첨가점
+    ("AVRG_SCORE", "average_score"),  # 평균 당첨가점
+    ("TOP_SCORE", "top_score"),  # 최고 당첨가점
+]
