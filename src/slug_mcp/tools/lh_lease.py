@@ -15,6 +15,7 @@ import httpx
 
 from ..clients import lh
 from ..models import LH_REGION_CODES, LhNoticeType
+from ._projection import LH_NOTICE_FIELDS, project
 
 _LIST_SERVICE = "lhLeaseNoticeInfo1"
 _DETAIL_SERVICE = "lhLeaseNoticeDtlInfo1"
@@ -199,6 +200,11 @@ async def search_lease_notices(
     청약홈(odcloud) 공고와 별개로, LH가 직접 공급하는 분양주택·임대주택·토지·상가·
     신혼희망타운 공고를 조회한다. 게시일 기간(start_date~end_date)은 필수다.
 
+    반환: {total, count, notices[...]}. 각 공고는 id·name·type·region·status·
+    posted_date·closing_date·detail_url과, get_lease_notice_detail 입력에 쓰는
+    supply_info_type·upper_type_code·system_div_code·detail_type_code를 담는다
+    (원본 코드필드는 제외). 상세·공고문 조회 시 이 값들을 그대로 넘긴다.
+
     Args:
         start_date: 게시일 검색 시작일 (YYYYMMDD, 예: 20200308)
         end_date: 게시일 검색 종료일 (YYYYMMDD, 예: 20200508)
@@ -225,7 +231,9 @@ async def search_lease_notices(
         params["PAN_SS"] = notice_status
 
     data = await lh.get(_LIST_SERVICE, **params)
-    return _parse_list_response(data, page=page, per_page=per_page)
+    parsed = _parse_list_response(data, page=page, per_page=per_page)
+    notices = [project(row, LH_NOTICE_FIELDS) for row in parsed["data"]]
+    return {"total": parsed["totalCount"], "count": len(notices), "notices": notices}
 
 
 async def get_lease_notice_detail(
@@ -259,6 +267,9 @@ async def get_lease_notice_detail(
 
     data = await lh.get(_DETAIL_SERVICE, operation=_DETAIL_OPERATION, **params)
     return {
+        # datasets는 공급정보구분코드에 따라 종류(dsSupInfo/dsSplScdl/dsCtrtPlc…)와
+        # 필드가 달라, 전 변형 샘플 없이 매핑하면 오라벨 위험이 커 후속 배치로 미룬다.
+        # 현재는 원본 유지 — docs/result-refinement-audit.md 참고.
         "datasets": _group_datasets(data),
         "attachments": find_attachments(data),
     }

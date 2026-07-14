@@ -40,14 +40,14 @@ async def test_search_lease_notices_sends_params_and_parses_header():
     assert params["UPP_AIS_TP_CD"] == "05"  # notice_type enum -> code
     assert params["CNP_CD"] == "41"  # region name -> LH region code
 
-    # 청약홈 검색 도구와 동일한 반환 키(data/totalCount/page/perPage/currentCount)
-    assert result["data"][0]["PAN_ID"] == "0000059187"
-    assert result["totalCount"] == 2
-    assert result["page"] == 1
-    assert result["perPage"] == 10
-    assert result["currentCount"] == 2
-    # LH 고유 메타
-    assert result["resultCode"] == "Y"
+    # 청약홈 검색 도구와 동일한 정제 반환형({total, count, notices})
+    assert result["total"] == 2
+    assert result["count"] == 2
+    assert result["notices"][0]["id"] == "0000059187"
+    assert result["notices"][0]["name"] == "고양삼송 공공분양주택"
+    assert result["notices"][0]["type"] == "분양주택"
+    # 원본 코드필드는 정제되어 노출되지 않는다.
+    assert "PAN_ID" not in result["notices"][0]
 
 
 @respx.mock
