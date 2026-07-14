@@ -103,11 +103,11 @@ SCORE_FIELDS: list[Field] = [
 ]
 
 # LH 분양·임대 공고 목록 행(dsList) → 정제 (search_lease_notices)
-# 주의: supply_info_type·upper_type_code·system_div_code·detail_type_code는
-# get_lease_notice_detail의 필수/선택 입력이라 반드시 남긴다(정제키를 그 파라미터명과
-# 일치시켜 체이닝이 자연스럽게). ALL_CNT·RNUM은 total 계산에만 쓰여 제외.
+# 상세 공급조건·공고문 원문은 detail_url(LH 청약센터 공고 페이지)에서 확인한다 —
+# 상세조회 도구가 제거돼 LH-내부 코드필드(SPL_INF_TP_CD 등)는 더 이상 노출하지 않는다.
+# ALL_CNT·RNUM은 total 계산에만 쓰여 제외.
 LH_NOTICE_FIELDS: list[Field] = [
-    ("PAN_ID", "id"),  # 공고ID → get_lease_notice_detail(notice_id)
+    ("PAN_ID", "id"),  # 공고ID
     ("PAN_NM", "name"),
     ("UPP_AIS_TP_NM", "type"),  # 분양주택/임대주택 등
     ("AIS_TP_CD_NM", "subtype"),  # 행복주택 등 세부유형명
@@ -115,9 +115,5 @@ LH_NOTICE_FIELDS: list[Field] = [
     ("PAN_SS", "status"),  # 공고상태 (공고중/접수중/접수마감 등)
     ("PAN_NT_ST_DT", "posted_date"),  # 공고게시일
     ("CLSG_DT", "closing_date"),  # 마감일
-    ("DTL_URL", "detail_url"),
-    ("SPL_INF_TP_CD", "supply_info_type"),  # ↓ get_lease_notice_detail 입력키
-    ("UPP_AIS_TP_CD", "upper_type_code"),
-    ("CCR_CNNT_SYS_DS_CD", "system_div_code"),
-    ("AIS_TP_CD", "detail_type_code"),
+    ("DTL_URL", "detail_url"),  # LH 청약센터 공고 상세 페이지 (상세·공고문 확인 링크)
 ]

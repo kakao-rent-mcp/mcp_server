@@ -41,8 +41,9 @@ mcp = FastMCP(
         "analyze_my_subscription(종합 판정) 또는 recommend_housing(공고 추천)을 호출한다. "
         "임대주택(영구·국민·행복·공공임대) 상담이면 update_my_profile에 "
         "target_housing.track='rental'(+rental_type)을 채우고 같은 session_id로 "
-        "analyze_my_rental(자격·순위 잠정판정)을 호출하세요. 임대 공고 검색·공고문 원문은 "
-        "search_lease_notices/extract_lease_notice_text를 사용합니다. "
+        "analyze_my_rental(자격·순위 잠정판정)을 호출하세요. 임대 공고 검색은 "
+        "search_lease_notices를 쓰고, 공고문 원문·상세 공급조건은 결과의 detail_url"
+        "(LH 청약센터 공고 페이지)에서 확인합니다. "
         "금액 단위는 모두 원(KRW)이며 필드명에 _krw가 붙습니다. "
         "프로필은 서버 메모리에 24시간만 보관됩니다."
     ),
@@ -65,8 +66,6 @@ _TOOLS: tuple[tuple[Callable[..., Any], str, dict[str, Any]], ...] = (
     (notices.search_housing_notices, "분양 공고 검색", _READ_EXTERNAL),
     (notices.get_notice_detail, "분양 공고 상세 조회", _READ_EXTERNAL),
     (lh_lease.search_lease_notices, "LH 분양·임대 공고 검색", _READ_EXTERNAL),
-    (lh_lease.get_lease_notice_detail, "LH 공고 상세 조회", _READ_EXTERNAL),
-    (lh_lease.extract_lease_notice_text, "LH 공고문 원문 추출", _READ_EXTERNAL),
     (competition.get_competition_stats, "경쟁률·당첨가점 조회", _READ_EXTERNAL),
     (profile.update_my_profile, "내 프로필 저장·갱신", _WRITE_LOCAL),
     (profile.get_my_profile, "내 프로필 조회", _READ_LOCAL),

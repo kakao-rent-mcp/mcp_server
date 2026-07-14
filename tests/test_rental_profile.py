@@ -118,9 +118,10 @@ def test_filled_rental_profile_guides_to_lease_tools():
     )
     assert result["missing_required_fields"] == []
     assert result["missing_recommended_fields"] == []
-    # 임대는 analyze_my_rental로 판정하고, 공고문 원문 대조 도구도 함께 안내한다.
+    # 임대는 analyze_my_rental로 판정하고, 공고 검색·공고문 원문 대조 경로도 함께 안내한다.
     assert "analyze_my_rental" in result["guidance"]
-    assert "extract_lease_notice_text" in result["guidance"]
+    assert "search_lease_notices" in result["guidance"]
+    assert "detail_url" in result["guidance"]
 
 
 def test_analyze_refuses_rental_track_explicitly():

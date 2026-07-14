@@ -42,9 +42,7 @@ uv run slug-mcp
 | `search_housing_notices` | 지역·유형으로 진행 중인 분양 공고 목록 검색 (청약홈) |
 | `get_notice_detail` | 공고 하나의 상세정보 + 주택형별 분양가·면적 (청약홈) |
 | `get_competition_stats` | 공고의 과거 경쟁률·당첨가점·특별공급 신청현황 (청약홈) |
-| `search_lease_notices` | LH 분양·임대 공고를 게시기간으로 검색 |
-| `get_lease_notice_detail` | LH 공고 하나의 상세 공급정보·첨부파일 조회 |
-| `extract_lease_notice_text` | LH 공고문 PDF를 내려받아 본문 텍스트 추출 |
+| `search_lease_notices` | LH 분양·임대 공고를 게시기간으로 검색 (상세·공고문 원문은 결과 `detail_url`에서 확인) |
 | `update_my_profile` | 대화에서 파악한 사용자 정보를 세션에 누적 저장 (부분 업데이트) |
 | `get_my_profile` | 저장된 프로필과 완성도(부족 항목·다음 질문) 조회 |
 | `analyze_my_subscription` | 룰 엔진 종합 판정: 자격 필터 → 가점·배점 → 컷오프 대조 → 트랙 추천 |
@@ -123,10 +121,11 @@ uv run slug-mcp
   [감사 문서](docs/data-integrity-audit.md)의 후속 조치 참고.
 - **프로필 저장은 프로세스 메모리입니다.** 서버 재시작·스케일아웃 시 세션이 사라집니다.
   단일 컨테이너 배포 전제이며, 다중 인스턴스가 필요해지면 외부 스토어 검토가 필요합니다.
-- **임대 자격판정은 미구현입니다.** LH 분양·임대 공고 조회 도구(`search_lease_notices`
-  등 3종)는 있으나, 임대주택 소득·자산 기준 판정 로직은 없습니다. 사전청약
-  `lhLeaseNoticeBfhDtllInfo1`(분양임대공고별 상세정보) 오퍼레이션은 아직 서버에서 HTTP
-  500을 반환하는 상태라 `clients/lh.py`에만 있고 도구로는 연결하지 않았습니다.
+- **LH 공고의 상세·공고문 원문 조회는 도구로 제공하지 않습니다.** 상세 오퍼레이션
+  `lhLeaseNoticeDtlInfo1`은 서비스키 활용승인이 있어도 게이트웨이에서 HTTP 403을 반환해,
+  `get_lease_notice_detail`·`extract_lease_notice_text` 도구를 제거했습니다. 상세 공급조건과
+  공고문 원문은 `search_lease_notices` 결과의 `detail_url`(LH 청약센터 공고 페이지)에서
+  확인합니다. LH 조회 도구는 현재 `search_lease_notices` 1종입니다.
 
 ## 테스트
 

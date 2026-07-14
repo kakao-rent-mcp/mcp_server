@@ -37,6 +37,7 @@ def analyze_my_subscription(session_id: str) -> dict[str, Any]:
         return {
             "status": "rental_track",
             "guidance": "임대주택 자격 판정은 analyze_my_rental을 사용하세요. 공고 검색은 "
-            "search_lease_notices, 공고문 원문 대조는 extract_lease_notice_text입니다.",
+            "search_lease_notices이며, 공고문 원문은 결과의 detail_url"
+            "(LH 청약센터 공고 페이지)에서 대조합니다.",
         }
     return engine.analyze(doc)
