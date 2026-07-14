@@ -5,9 +5,11 @@ from __future__ import annotations
 import asyncio
 
 from ..clients import odcloud
+from ._errors import refine_errors
 from ._projection import COMPETITION_FIELDS, SCORE_FIELDS, project
 
 
+@refine_errors
 async def get_competition_stats(house_manage_no: str) -> dict:
     """공고의 순위별 경쟁률, 당첨 가점, 특별공급 신청현황을 함께 조회한다.
 

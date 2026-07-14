@@ -42,7 +42,8 @@ def project(row: dict[str, Any], fields: list[Field]) -> dict[str, Any]:
 
 # 청약홈 분양공고 목록 행 → 정제 (search_housing_notices)
 NOTICE_LIST_FIELDS: list[Field] = [
-    ("HOUSE_MANAGE_NO", "id"),  # 후속 도구(get_notice_detail·get_competition_stats) 입력키 — 필수 유지
+    # id는 get_notice_detail·get_competition_stats 입력키 — 반드시 유지
+    ("HOUSE_MANAGE_NO", "id"),
     ("HOUSE_NM", "name"),
     ("HOUSE_SECD_NM", "house_type"),  # APT 등
     ("HOUSE_DTL_SECD_NM", "track"),  # 국민/민영

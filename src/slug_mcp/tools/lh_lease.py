@@ -15,6 +15,7 @@ import httpx
 
 from ..clients import lh
 from ..models import LH_REGION_CODES, LhNoticeType
+from ._errors import refine_errors
 from ._projection import LH_NOTICE_FIELDS, project
 
 _LIST_SERVICE = "lhLeaseNoticeInfo1"
@@ -185,6 +186,7 @@ async def _download(url: str, timeout: int = 30) -> bytes:
 # ──────────────────────────────────────────────────────────────────────────
 # MCP 도구
 # ──────────────────────────────────────────────────────────────────────────
+@refine_errors
 async def search_lease_notices(
     start_date: str,
     end_date: str,
@@ -236,6 +238,7 @@ async def search_lease_notices(
     return {"total": parsed["totalCount"], "count": len(notices), "notices": notices}
 
 
+@refine_errors
 async def get_lease_notice_detail(
     notice_id: str,
     supply_info_type: str,
@@ -275,6 +278,7 @@ async def get_lease_notice_detail(
     }
 
 
+@refine_errors
 async def extract_lease_notice_text(
     notice_id: str,
     supply_info_type: str,
@@ -302,6 +306,9 @@ async def extract_lease_notice_text(
         system_div_code=system_div_code,
         detail_type_code=detail_type_code,
     )
+    # 상세 조회가 정제된 에러(외부 API 실패)를 돌려주면 그대로 전파한다.
+    if detail.get("status") == "error":
+        return detail
     attachments = detail["attachments"]
     target = pick_notice_pdf(attachments)
     if target is None:

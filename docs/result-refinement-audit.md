@@ -73,11 +73,24 @@
 - 현재는 에러가 원본 예외 문자열로 노출됨 → 규칙은 **정제된 텍스트(마크다운) 안내**를 권장.
 - 조치: 조회 도구에 공통 에러 정제 래퍼(사용자용 안내 메시지 + 원인 요약) 도입 검토.
 
-## 다음 단계 (제안)
-1. (본 조사 완료) 범위 확정.
-2. `playmcp-guidelines.md`에 신규 규칙 2개 + 미충족 상태 반영.
-3. 반환 정제 리팩터링:
-   - 공통: odcloud/LH 원본 행 → 의미어 키 매핑 유틸 1개 도입.
-   - 우선순위: 1 → 11 → 2/3/6 → 4 → (5 크기) → 에러 정제.
+## 진행 상태 (2026-07-14 갱신)
+
+- [x] 범위 확정 (본 조사)
+- [x] 공통 정제 유틸 `tools/_projection.py` (project + 매핑 테이블)
+- [x] 1. `search_housing_notices` 정제 + fetch/projection 분리
+- [x] 11. `recommend_housing` 추천 카드 notice 정제
+- [x] 6. `get_competition_stats` 경쟁률·가점 정제 (특공은 defer)
+- [x] 2. `get_notice_detail` 정제 (notice 단일 객체화 + unit_types)
+- [x] 3. `search_lease_notices` 정제 ({total,count,notices})
+- [x] 에러 정제 `tools/_errors.py` (`refine_errors`) — 외부 API 도구 7개 적용
+- [x] `playmcp-guidelines.md`에 신규 규칙 2개 + 충족 상태 반영
+- [ ] **특별공급(특공) 34필드** 전용 변환 — 실 응답 샘플 필요
+- [ ] **LH `get_lease_notice_detail` datasets** — 공고유형별 변형 샘플 필요
+- [ ] 5. `extract_lease_notice_text` — text 전문 유지 확정(설계상), 봉투 최소화 여부만 검토
+
+### defer 사유 (특공 / datasets)
+둘 다 **필드가 코드 조합이거나 공고유형별로 가변**이라, 실 응답 전 변형을
+확보하지 않은 채 매핑하면 값을 오라벨할 위험이 크다. 특히 특공은 엔진이 소비할
+여지가 있어 잘못 정제하면 판정이 조용히 틀어질 수 있으므로 샘플 확보 후 진행한다.
 </content>
 </invoke>

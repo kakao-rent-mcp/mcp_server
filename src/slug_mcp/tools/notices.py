@@ -6,6 +6,7 @@ import asyncio
 
 from ..clients import odcloud
 from ..models import HouseCategory
+from ._errors import refine_errors
 from ._projection import NOTICE_LIST_FIELDS, UNIT_TYPE_FIELDS, project
 
 _DETAIL_OPERATION_BY_CATEGORY: dict[HouseCategory, str] = {
@@ -33,6 +34,7 @@ async def fetch_housing_notices(
     return await odcloud.get("ApplyhomeInfoDetailSvc", operation, **params)
 
 
+@refine_errors
 async def search_housing_notices(
     house_category: HouseCategory = HouseCategory.APT,
     region: str | None = None,
@@ -61,6 +63,7 @@ async def search_housing_notices(
     }
 
 
+@refine_errors
 async def get_notice_detail(house_manage_no: str) -> dict:
     """APT 공고 하나의 상세정보와 주택형별(평형별) 분양가·면적을 함께 조회한다.
 

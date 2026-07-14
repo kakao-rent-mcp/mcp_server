@@ -16,6 +16,7 @@ from .. import store as store_module
 from ..models import HouseCategory
 from . import competition as competition_tools
 from . import notices as notices_tools
+from ._errors import refine_errors
 from ._projection import NOTICE_CARD_FIELDS, project
 
 _KST = timezone(timedelta(hours=9))
@@ -287,6 +288,7 @@ def _build_winning_score(
     }
 
 
+@refine_errors
 async def recommend_housing(
     session_id: str,
     house_category: HouseCategory = HouseCategory.APT,
